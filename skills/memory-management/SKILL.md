@@ -9,17 +9,47 @@ You have a persistent auto memory via markdown files. The memory directory path 
 Its contents persist across conversations.
 As you work, consult your memory files to build on previous experience.
 
+## Tree structure
+
+Memory is a **tree**. Load only the branch you need.
+
+```
+MEMORY.md                 ← root index — always loaded, stays under 200 lines
+<area>.md                 ← one file per functional area (branch node)
+<area>/<subtopic>.md      ← deep detail (leaf node), created only when area file > ~150 lines
+```
+
+### Reading
+
+1. `MEMORY.md` is always loaded. It is an index only — short entry + relative link per area.
+2. At session start, identify which area(s) your task touches.
+3. Read the relevant area file(s) before starting work.
+4. If an area file links to a sub-topic you need, read that too.
+5. Ignore branches unrelated to your task.
+
+### Writing
+
+- **MEMORY.md**: one-line summary + relative link per area. Do not put detail here.
+- **Area file** (`<area>.md`): all stable facts, decisions, gotchas, and patterns for that area.
+- **Sub-topic file** (`<area>/<subtopic>.md`): create only when an area grows beyond ~150 lines.
+  When you create one, replace the inline detail in the area file with a link.
+
+### Example root index entry
+
+```markdown
+## OCR Pipeline
+Paperwork intake, zip upload, review queue, per-tenant credential resolution.
+→ [ocr.md](ocr.md)
+```
+
 ## How to save memories: <!-- markdownlint-disable-line MD026 -->
 
-- Organize memory semantically by topic, not chronologically
-- Use the Write and Edit tools to update your memory files
-- `MEMORY.md` is always loaded into your conversation context — lines after
-200 will be truncated, so keep it concise
-- Create separate topic files (for example, `debugging.md`, `patterns.md`) for
-  detailed notes and link to them from MEMORY.md
+- Organize memory semantically by area/topic, not chronologically
+- Use the Write and Edit tools to update memory files
+- `MEMORY.md` stays under 200 lines — it is an index, not a detail store
+- Put detail in area files; put deep detail in sub-topic files under the area directory
 - Update or remove memories that turn out to be wrong or outdated
-- Do not write duplicate memories. First check if there is an existing memory
-you can update before writing a new one.
+- Do not write duplicate memories. Check existing files before writing a new entry.
 
 ## What to save: <!-- markdownlint-disable-line MD026 -->
 

@@ -8,20 +8,65 @@ alwaysApply: true
 This project stores persistent memory at `agent_docs/memory/MEMORY.md`.
 Both Cursor and Claude Code memory directories are symlinked there — all agents read and write the same files.
 
+## Tree structure
+
+Memory is organized as a **tree**. Agents load only the branches relevant to their current task.
+
+```
+agent_docs/memory/
+  MEMORY.md              ← root index — always loaded, max ~200 lines
+  <area>.md              ← one file per functional area (branch node)
+  <area>/<subtopic>.md   ← deep detail for a sub-area (leaf node)
+```
+
+### Reading the tree
+
+1. `MEMORY.md` is always loaded automatically. It is a concise index only — no deep detail.
+2. At session start, identify which area(s) your task touches from the index entries.
+3. Read the relevant area file(s) before starting work.
+4. If the area file links to a sub-topic file needed for your task, read that too.
+5. Do not read branches unrelated to your task — keep context lean.
+
+### Writing to the tree
+
+- **MEMORY.md**: one-line entry per area, with a relative link to the area file. Keep it under 200 lines.
+- **Area file** (`<area>.md`): all stable facts, decisions, gotchas, and patterns for that area.
+- **Sub-topic file** (`<area>/<subtopic>.md`): created only when an area file grows beyond ~150 lines or a sub-topic needs isolated detail.
+- When adding a sub-topic file, replace the inline detail in the area file with a one-line link.
+
+### Example index entry in MEMORY.md
+
+```markdown
+## OCR Pipeline
+Paperwork intake, zip upload, review queue, credential resolution.
+→ [ocr.md](ocr.md)
+```
+
+### Example area file structure
+
+```markdown
+# OCR Pipeline
+
+## Architecture
+...
+
+## Credentials
+...
+→ [credentials.md](credentials/credentials.md)  ← only if detail warrants a sub-file
+
+## Gotchas
+...
+```
+
 ## When to update
 
-Update `agent_docs/memory/MEMORY.md` (or its topic files) when you learn:
+Update the tree when you learn:
 - A new architectural decision or pattern
 - A critical "gotcha" (DB state, build requirement, PATH issue, etc.)
 - A customer-facing fact that changed (business_id, credentials location, deployment state)
 - A lesson from a mistake that should not be repeated
 
 Do NOT save: in-progress task state, speculative plans, or anything already in git history.
-
-## Topic files
-
-- `agent_docs/memory/customer-onboarding.md` — onboarding playbook for new customers
-- `agent_docs/memory/feedback.md` — working style preferences and lessons learned
 
 ## Format
 
