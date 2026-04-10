@@ -269,7 +269,33 @@ def update(
 @click.option("--dry-run", is_flag=True, help="Preview changes without writing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
 def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
-    """Validate setup, pointer resolution, and note structure."""
+    """Validate setup, pointer resolution, and note structure.
+
+    Reports whether the project integration is stale and suggests
+    `agent-knowledge refresh-system` when the framework version has changed.
+    """
+    from agent_knowledge.runtime.refresh import is_stale
+
+    repo_root = Path(project).resolve()
+    stale, prior, current = is_stale(repo_root)
+
+    if stale and not json_mode:
+        if prior:
+            click.secho(
+                f"Warning: project integration is at v{prior}, installed framework is v{current}. "
+                f"Run: agent-knowledge refresh-system",
+                fg="yellow",
+                err=True,
+            )
+        else:
+            click.secho(
+                f"Warning: no framework_version in STATUS.md. "
+                f"Run: agent-knowledge refresh-system",
+                fg="yellow",
+                err=True,
+            )
+        click.echo("", err=True)
+
     args = ["--project", project]
     _add_common_flags(args, dry_run=dry_run, json_mode=json_mode)
     sys.exit(run_bash_script("doctor.sh", args))
@@ -388,6 +414,365 @@ def measure_tokens(args: tuple[str, ...]) -> None:
     if not args:
         sys.exit(run_python_script("measure-token-savings.py", ["--help"]))
     sys.exit(run_python_script("measure-token-savings.py", list(args)))
+
+
+# -- search ---------------------------------------------------------------- #
+
+
+@main.command()
+@click.argument("query", required=False, default="")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--limit", default=10, show_default=True, help="Max results.")
+@click.option("--all", "include_all", is_flag=True, help="Include Evidence/Outputs in results (default: Memory-first).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def search(query: str, project: str, limit: int, include_all: bool, json_mode: bool) -> None:
+    """Search the knowledge index. Prefers Memory/ over Evidence/Outputs.
+
+    \b
+    Layer 1: loads the compact index (Outputs/knowledge-index.json).
+    Layer 2: returns a ranked shortlist of relevant notes.
+    Layer 3: use --full or read the note files directly for full content.
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.index import search as idx_search
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if not vault.is_dir():
+        click.echo("No agent-knowledge vault found. Run: agent-knowledge init", err=True)
+        sys.exit(1)
+
+    if not query:
+        click.echo("Usage: agent-knowledge search <query>", err=True)
+        sys.exit(0)
+
+    results = idx_search(vault, query, max_results=limit, include_non_canonical=include_all)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"query": query, "results": results}, indent=2))
+        return
+
+    if not results:
+        click.echo(f"No results for: {query}", err=True)
+        return
+
+    click.secho(f"Results for '{query}' ({len(results)} found):", bold=True, err=True)
+    for r in results:
+        canonical_tag = "[Memory]" if r["canonical"] else f"[{r['folder']}]"
+        entry_tag = " (branch entry)" if r["is_branch_entry"] else ""
+        click.echo(f"\n  {canonical_tag}{entry_tag} {r['path']}", err=True)
+        click.echo(f"    {r['title']}", err=True)
+        if r.get("summary"):
+            click.echo(f"    {r['summary'][:120]}", err=True)
+
+
+# -- index ----------------------------------------------------------------- #
+
+
+@main.command("index")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def index_cmd(project: str, dry_run: bool, json_mode: bool) -> None:
+    """Regenerate the knowledge index in Outputs/.
+
+    Produces Outputs/knowledge-index.json (machine-readable) and
+    Outputs/knowledge-index.md (compact human/agent catalog).
+    The index is non-canonical output -- not curated memory.
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.index import write_index
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if not vault.is_dir():
+        click.echo("No agent-knowledge vault found. Run: agent-knowledge init", err=True)
+        sys.exit(1)
+
+    actions = write_index(vault, dry_run=dry_run)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"index": actions}, indent=2))
+    else:
+        for action in actions:
+            click.echo(action, err=True)
+
+
+# -- export-html ----------------------------------------------------------- #
+
+
+@main.command("export-html")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--output-dir", default=None, type=click.Path(), help="Output directory (default: Outputs/site/).")
+@click.option("--include-evidence", is_flag=True, default=True, show_default=True, help="Include Evidence/ notes in the site.")
+@click.option("--no-evidence", "include_evidence", flag_value=False, help="Exclude Evidence/ notes from the site.")
+@click.option("--dry-run", is_flag=True, help="Preview what would be generated without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON summary only.")
+@click.option("--open", "open_browser", is_flag=True, help="Open the generated site in the browser after export.")
+def export_html(
+    project: str,
+    output_dir: str | None,
+    include_evidence: bool,
+    dry_run: bool,
+    json_mode: bool,
+    open_browser: bool,
+) -> None:
+    """Build a polished static HTML site from the knowledge vault.
+
+    Generates Outputs/site/index.html and Outputs/site/data/knowledge.json.
+    Opens in any browser without Obsidian. Memory/ is primary; Evidence/ and
+    Outputs/ are clearly marked non-canonical.
+
+    \b
+    Examples:
+      agent-knowledge export-html
+      agent-knowledge export-html --open
+      agent-knowledge export-html --dry-run
+      agent-knowledge export-html --no-evidence
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.site import generate_site
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if not vault.is_dir():
+        click.echo("No agent-knowledge vault found. Run: agent-knowledge init", err=True)
+        sys.exit(1)
+
+    out_dir = Path(output_dir).resolve() if output_dir else None
+    result = generate_site(
+        vault,
+        out_dir,
+        dry_run=dry_run,
+        include_evidence=include_evidence,
+    )
+
+    if json_mode:
+        click.echo(json_mod.dumps(result, indent=2))
+        return
+
+    if dry_run:
+        click.echo(f"[dry-run] would generate site: {result['site_dir']}", err=True)
+        click.echo(f"  {result['branch_count']} branches, {result['decision_count']} decisions, {result['evidence_count']} evidence items", err=True)
+    else:
+        action = result["action"]
+        click.echo(f"{action}: {result['site_dir']}", err=True)
+        click.echo(f"  index.html — {result['branch_count']} branches, {result['decision_count']} decisions, {result['note_count']} notes total", err=True)
+        click.echo(f"  data/knowledge.json — structured site data", err=True)
+        if open_browser:
+            import webbrowser
+            webbrowser.open(Path(result["index_html"]).as_uri())
+
+
+# -- view ------------------------------------------------------------------ #
+
+
+@main.command()
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--output-dir", default=None, type=click.Path(), help="Override output directory for the site.")
+def view(project: str, output_dir: str | None) -> None:
+    """Build the knowledge site and open it in the browser.
+
+    Equivalent to export-html --open. No Obsidian required.
+    The site is generated into Outputs/site/ and opened via file://.
+    """
+    import webbrowser
+
+    from agent_knowledge.runtime.site import generate_site
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if not vault.is_dir():
+        click.echo("No agent-knowledge vault found. Run: agent-knowledge init", err=True)
+        sys.exit(1)
+
+    out_dir = Path(output_dir).resolve() if output_dir else None
+    result = generate_site(vault, out_dir)
+    click.echo(f"{result['action']}: {result['site_dir']}", err=True)
+    webbrowser.open(Path(result["index_html"]).as_uri())
+
+
+# -- clean-import ---------------------------------------------------------- #
+
+
+@main.command("clean-import")
+@click.argument("source")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--slug", default=None, help="Override output filename slug.")
+@click.option("--output-dir", default=None, type=click.Path(), help="Override output directory (default: Evidence/imports/).")
+@click.option("--dry-run", is_flag=True, help="Preview without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def clean_import(
+    source: str,
+    project: str,
+    slug: str | None,
+    output_dir: str | None,
+    dry_run: bool,
+    json_mode: bool,
+) -> None:
+    """Import a URL or HTML file as cleaned evidence into Evidence/imports/.
+
+    Strips navigation, ads, scripts, and boilerplate. Writes clean markdown
+    with YAML frontmatter marking it as non-canonical evidence.
+
+    \b
+    Examples:
+      agent-knowledge clean-import https://docs.example.com/api
+      agent-knowledge clean-import page.html --slug api-ref-2025-01-15
+      agent-knowledge clean-import https://... --dry-run
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.importer import clean_import as do_import
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if output_dir:
+        out_dir = Path(output_dir).resolve()
+    else:
+        out_dir = vault / "Evidence" / "imports"
+
+    try:
+        path, action, title = do_import(source, out_dir, slug=slug, dry_run=dry_run)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(
+            json_mod.dumps(
+                {
+                    "action": action,
+                    "path": str(path),
+                    "title": title,
+                    "source": source,
+                    "dry_run": dry_run,
+                },
+                indent=2,
+            )
+        )
+    else:
+        if dry_run:
+            click.echo(f"[dry-run] would create: {path}", err=True)
+        elif action == "exists":
+            click.echo(f"exists (same content): {path}", err=True)
+        else:
+            click.echo(f"{action}: {path}", err=True)
+        if title and not json_mode:
+            click.echo(f"  title: {title}", err=True)
+
+
+# -- export-canvas --------------------------------------------------------- #
+
+
+@main.command("export-canvas")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--output", default=None, type=click.Path(), help="Output .canvas path (default: Outputs/knowledge-export.canvas).")
+@click.option("--dry-run", is_flag=True, help="Preview without writing.")
+def export_canvas(project: str, output: str | None, dry_run: bool) -> None:
+    """Export the knowledge vault as an Obsidian Canvas (.canvas) file.
+
+    Generates a spatial graph of Memory/ notes with edges derived from
+    markdown links. Open in Obsidian with Core plugins > Canvas enabled.
+
+    This is an optional Output: non-canonical and regeneratable.
+    The system works fully without it.
+    """
+    from agent_knowledge.runtime.canvas import export_canvas as do_export
+
+    vault = Path(project).resolve() / "agent-knowledge"
+    if not vault.is_dir():
+        click.echo("No agent-knowledge vault found. Run: agent-knowledge init", err=True)
+        sys.exit(1)
+
+    out_path = Path(output).resolve() if output else None
+    path, action = do_export(vault, out_path, dry_run=dry_run)
+
+    if dry_run:
+        click.echo(f"[dry-run] would write: {path}", err=True)
+    else:
+        click.echo(f"{action}: {path}", err=True)
+        click.echo("  Open in Obsidian: Core plugins > Canvas", err=True)
+
+
+# -- refresh-system -------------------------------------------------------- #
+
+
+@main.command("refresh-system")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--dry-run", is_flag=True, help="Preview what would change without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON summary only.")
+@click.option("--force", is_flag=True, hidden=True, help="Force updates even when up-to-date.")
+def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) -> None:
+    """Refresh project integration files to the current framework version.
+
+    Updates bridge files (AGENTS.md header, Cursor hooks, CLAUDE.md, Codex config)
+    and metadata version markers (STATUS.md, .agent-project.yaml).
+
+    Memory/, Evidence/, Sessions/, and project-curated content are never touched.
+    Safe to run after `pip install -U agent-knowledge-cli`.
+
+    \b
+    Examples:
+      agent-knowledge refresh-system
+      agent-knowledge refresh-system --dry-run
+      agent-knowledge refresh-system --json
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    repo_root = Path(project).resolve()
+    result = run_refresh(repo_root, dry_run=dry_run, force=force)
+
+    if json_mode:
+        click.echo(json_mod.dumps(result, indent=2))
+        return
+
+    action = result["action"]
+    version = result["framework_version"]
+    prior = result.get("prior_version")
+    changes = result.get("changes", [])
+    warnings = result.get("warnings", [])
+
+    if not dry_run:
+        if action == "up-to-date":
+            click.secho(f"Up to date. (framework v{version})", bold=True, err=True)
+        else:
+            label = "dry-run preview" if dry_run else f"Refreshed to v{version}"
+            if prior and prior != version:
+                label += f" (was: {prior})"
+            click.secho(label, bold=True, err=True)
+    else:
+        click.echo(f"[dry-run] framework v{version}", err=True)
+
+    click.echo("", err=True)
+
+    # Group changes by action
+    for c in changes:
+        act = c["action"]
+        target = c["target"]
+        detail = c.get("detail", "")
+        if act == "up-to-date":
+            click.echo(f"  ok       {target}  ({detail})", err=True)
+        elif act in ("updated", "created"):
+            click.secho(f"  updated  {target}  ({detail})", fg="green", err=True)
+        elif act == "dry-run":
+            click.echo(f"  [would]  {target}  ({detail})", err=True)
+        elif act == "skip":
+            click.echo(f"  skip     {target}  ({detail})", err=True)
+        elif act == "warn":
+            click.secho(f"  warn     {target}  ({detail})", fg="yellow", err=True)
+
+    if warnings:
+        click.echo("", err=True)
+        for w in warnings:
+            click.secho(f"Warning: {w}", fg="yellow", err=True)
+
+    click.echo("", err=True)
+    if not dry_run and action not in ("up-to-date",):
+        click.echo("Next: agent-knowledge doctor --project .", err=True)
 
 
 # -- setup ----------------------------------------------------------------- #

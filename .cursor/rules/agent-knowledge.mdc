@@ -1,0 +1,11 @@
+---
+description: Agent knowledge system -- read on every session
+alwaysApply: true
+---
+
+This project uses agent-knowledge for persistent memory.
+
+On session start:
+1. Read `./agent-knowledge/STATUS.md`
+2. If `onboarding: pending`, read `AGENTS.md` and follow the First-Time Onboarding instructions
+3. If `onboarding: complete`, read `./agent-knowledge/Memory/MEMORY.md` for project context

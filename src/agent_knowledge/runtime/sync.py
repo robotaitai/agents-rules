@@ -1,4 +1,11 @@
-"""Sync logic: memory branch sync, session rollup, git-log evidence extraction."""
+"""Sync logic: memory branch sync, session rollup, git-log evidence extraction.
+
+Also integrates:
+- Capture: each sync event is recorded in Evidence/captures/ as a lightweight
+  evidence item (not curated memory, never auto-promoted).
+- Index: Outputs/knowledge-index.json and .md are regenerated on each sync
+  so agents and humans always have a current compact catalog.
+"""
 
 from __future__ import annotations
 
@@ -234,13 +241,76 @@ def stamp_status(repo: Path, field: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. Top-level sync orchestrator
+# 5. Capture event recording -> Evidence/captures/
+# ---------------------------------------------------------------------------
+
+def _record_sync_capture(
+    repo: Path,
+    *,
+    memory_actions: list[str],
+    dry_run: bool = False,
+) -> list[str]:
+    """Record a sync event in Evidence/captures/."""
+    from .capture import record as capture_record
+
+    vault = repo / "agent-knowledge"
+    captures_dir = vault / "Evidence" / "captures"
+
+    # Derive touched branches from memory-sync actions (e.g. "updated: Memory/stack.md")
+    touched: list[str] = []
+    for action in memory_actions:
+        m = re.search(r"Memory/([^\s]+\.md)", action)
+        if m:
+            touched.append(m.group(1))
+
+    # Infer project slug from the vault name
+    try:
+        slug = repo.name
+    except Exception:
+        slug = "unknown"
+
+    _path, action = capture_record(
+        captures_dir,
+        event_type="sync",
+        source_tool="cli",
+        project_slug=slug,
+        summary="Project sync: memory branches updated, session rollup rebuilt, git evidence extracted.",
+        touched_branches=touched,
+        dry_run=dry_run,
+    )
+
+    if action == "created":
+        return [f"  recorded capture: Evidence/captures/"]
+    elif action == "exists":
+        return ["  capture: already recorded this minute (skipped)"]
+    else:
+        return [f"  [dry-run] would record capture: Evidence/captures/"]
+
+
+# ---------------------------------------------------------------------------
+# 6. Knowledge index generation -> Outputs/
+# ---------------------------------------------------------------------------
+
+def _regenerate_index(repo: Path, *, dry_run: bool = False) -> list[str]:
+    """Regenerate Outputs/knowledge-index.json and .md."""
+    from .index import write_index
+
+    vault = repo / "agent-knowledge"
+    if not vault.is_dir():
+        return ["  skip: agent-knowledge vault not found"]
+
+    return write_index(vault, dry_run=dry_run)
+
+
+# ---------------------------------------------------------------------------
+# 7. Top-level sync orchestrator
 # ---------------------------------------------------------------------------
 
 def run_sync(
     repo: Path,
     *,
     dry_run: bool = False,
+    source_tool: str = "cli",
 ) -> dict[str, list[str]]:
     """Run all sync steps. Returns a dict of step -> action list."""
     results: dict[str, list[str]] = {}
@@ -248,6 +318,10 @@ def run_sync(
     results["memory-branches"] = sync_memory_branches(repo, dry_run=dry_run)
     results["session-rollup"] = rollup_sessions(repo, dry_run=dry_run)
     results["git-evidence"] = extract_git_log(repo, dry_run=dry_run)
+    results["capture"] = _record_sync_capture(
+        repo, memory_actions=results["memory-branches"], dry_run=dry_run
+    )
+    results["index"] = _regenerate_index(repo, dry_run=dry_run)
 
     if not dry_run:
         stamp_status(repo, "last_project_sync")

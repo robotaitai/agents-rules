@@ -261,6 +261,8 @@ kc_log ""
 # Create minimal directory scaffold
 # ---------------------------------------------------------------------------
 
+EVIDENCE_CAPTURES_DIR="$EVIDENCE_DIR/captures"
+
 for dir in \
     "$KNOWLEDGE_DIR" \
     "$MEMORY_DIR" \
@@ -268,6 +270,7 @@ for dir in \
     "$EVIDENCE_DIR" \
     "$EVIDENCE_RAW_DIR" \
     "$EVIDENCE_IMPORTS_DIR" \
+    "$EVIDENCE_CAPTURES_DIR" \
     "$SESSIONS_DIR" \
     "$OUTPUTS_DIR" \
     "$DASHBOARDS_DIR" \
@@ -283,6 +286,7 @@ done
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/README.md" "$EVIDENCE_DIR/README.md" "agent-knowledge/Evidence/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/raw/README.md" "$EVIDENCE_RAW_DIR/README.md" "agent-knowledge/Evidence/raw/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/imports/README.md" "$EVIDENCE_IMPORTS_DIR/README.md" "agent-knowledge/Evidence/imports/README.md"
+copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/captures/README.md" "$EVIDENCE_CAPTURES_DIR/README.md" "agent-knowledge/Evidence/captures/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Sessions/README.md" "$SESSIONS_DIR/README.md" "agent-knowledge/Sessions/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Outputs/README.md" "$OUTPUTS_DIR/README.md" "agent-knowledge/Outputs/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Templates/README.md" "$LOCAL_TEMPLATES_DIR/README.md" "agent-knowledge/Templates/README.md"

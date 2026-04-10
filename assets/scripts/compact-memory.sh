@@ -158,6 +158,32 @@ done <<EOF
 $memory_files
 EOF
 
+# Prune old captures: keep the 30 most recent, remove the rest.
+CAPTURES_DIR="$EVIDENCE_DIR/captures"
+if [ -d "$CAPTURES_DIR" ]; then
+    captures_all="$(find "$CAPTURES_DIR" -name "*.yaml" | sort -r)"
+    capture_count=0
+    pruned_count=0
+    while IFS= read -r cap; do
+        [ -n "$cap" ] || continue
+        capture_count=$((capture_count + 1))
+        if [ "$capture_count" -gt 30 ]; then
+            if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                kc_log "  would prune capture: $(basename "$cap")"
+            else
+                rm -f "$cap"
+                pruned_count=$((pruned_count + 1))
+            fi
+        fi
+    done <<EOF
+$captures_all
+EOF
+    if [ "$pruned_count" -gt 0 ]; then
+        COMPACTED+=("Evidence/captures ($pruned_count removed)")
+        kc_log "  pruned $pruned_count old capture files (kept 30)"
+    fi
+fi
+
 kc_status_load
 if [ "${DRY_RUN:-0}" -eq 0 ] && [ ${#COMPACTED[@]} -gt 0 ]; then
     STATUS_LAST_COMPACTION="$(kc_now_utc)"
