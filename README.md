@@ -6,6 +6,8 @@ One command gives any project a knowledge vault that agents read on startup,
 maintain during work, and carry across sessions -- no database, no server,
 just markdown files and a CLI.
 
+Works with **Claude Code**, **Cursor**, and **Codex** out of the box.
+
 ## Install
 
 ```bash
@@ -21,18 +23,16 @@ cd your-project
 agent-knowledge init
 ```
 
-Open Cursor or Claude Code — the agent picks up from there automatically.
+That's it. Open the project in Claude Code or Cursor and the agent has
+persistent memory automatically -- no manual prompting, no config, no setup.
 
 `init` does everything in one shot:
-- infers the project slug from the directory name
 - creates an external knowledge vault at `~/agent-os/projects/<slug>/`
 - symlinks `./agent-knowledge` into the repo as the local handle
-- installs Cursor integration: `.cursor/rules/`, `.cursor/hooks.json`, `.cursor/commands/`
-- installs Claude integration: `.claude/settings.json`, `.claude/CLAUDE.md`, `.claude/commands/`
+- installs project-local integration for both Claude Code and Cursor
 - detects Codex and installs its bridge files if present
 - bootstraps the memory tree and marks onboarding as `pending`
-- imports repo history into `Evidence/` automatically
-- backfills lightweight history from git
+- imports repo history into `Evidence/` and backfills lightweight history from git
 
 ## How It Works
 
@@ -40,18 +40,102 @@ Knowledge lives **outside** the repo at `~/agent-os/projects/<slug>/` so it pers
 across branches, tools, and clones. The symlink `./agent-knowledge` gives every tool
 a stable local handle.
 
-### Architecture boundaries
+### Knowledge layers
 
 | Folder | Role | Canonical? |
 |--------|------|-----------|
-| `Memory/` | Curated, durable facts — source of truth | Yes |
-| `History/` | What happened over time — lightweight diary | Yes (diary) |
+| `Memory/` | Curated, durable facts -- source of truth | Yes |
+| `History/` | What happened over time -- lightweight diary | Yes (diary) |
 | `Evidence/` | Imported/extracted material, event stream | No |
 | `Outputs/` | Generated views, indexes, HTML export | No |
 | `Sessions/` | Ephemeral session state, prune aggressively | No |
 
 Evidence is never auto-promoted into Memory. Outputs are never treated as truth.
 Only agents and humans deliberately write to Memory or History.
+
+## Project-local integration
+
+The project carries everything it needs. Both Claude Code and Cursor get full
+integration installed automatically -- hooks, runtime contracts, and slash commands.
+No global config required.
+
+### What gets installed
+
+**Claude Code** (`.claude/`):
+
+| File | Purpose |
+|------|---------|
+| `settings.json` | Lifecycle hooks: sync on SessionStart, Stop, PreCompact |
+| `CLAUDE.md` | Runtime contract: knowledge layers, session protocol, onboarding |
+| `commands/memory-update.md` | `/memory-update` slash command |
+| `commands/system-update.md` | `/system-update` slash command |
+
+**Cursor** (`.cursor/`):
+
+| File | Purpose |
+|------|---------|
+| `rules/agent-knowledge.mdc` | Always-on rule: loads memory context on every session |
+| `hooks.json` | Lifecycle hooks: sync on start, update on write, sync on stop/compact |
+| `commands/memory-update.md` | `/memory-update` slash command |
+| `commands/system-update.md` | `/system-update` slash command |
+
+**Codex** (`.codex/`) -- installed when detected:
+
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | Agent contract with knowledge layer instructions |
+
+### Session lifecycle
+
+Hooks fire automatically -- the agent syncs memory at the start of every session
+and captures state at the end, with no manual intervention:
+
+| Event | Claude Code | Cursor | What runs |
+|-------|-------------|--------|-----------|
+| Session start | SessionStart | session-start | `agent-knowledge sync` |
+| File saved | -- | post-write | `agent-knowledge update` |
+| Task complete | Stop | stop | `agent-knowledge sync` |
+| Context compaction | PreCompact | preCompact | `agent-knowledge sync` |
+
+The runtime contract ensures the agent reads `STATUS.md` and `Memory/MEMORY.md`
+at the start of every session, with no manual prompting required.
+
+### Slash commands
+
+Inside any Claude Code or Cursor session:
+
+- `/memory-update` -- sync, review session work, write stable facts to `Memory/`, summarize
+- `/system-update` -- refresh integration files to the latest framework version
+
+These are project-local and work automatically because `init` installed them.
+
+### Integration health
+
+```bash
+agent-knowledge doctor
+```
+
+Reports whether all integration files (settings, hooks, rules, commands) are
+installed and current for both Claude Code and Cursor. If anything is stale or
+missing, `doctor` tells you exactly what to run.
+
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `init` | Set up a project -- one command, no arguments needed |
+| `sync` | Full sync: memory, history, git evidence, index |
+| `doctor` | Validate setup, integration health, version staleness |
+| `ship` | Validate + sync + commit + push |
+| `search <query>` | Search the knowledge index (Memory-first) |
+| `export-html` | Build a polished static site from the vault |
+| `view` | Build site and open in browser |
+| `clean-import <url>` | Import a URL as cleaned, non-canonical evidence |
+| `refresh-system` | Refresh all integration files to the current framework version |
+| `backfill-history` | Rebuild lightweight project history from git |
+| `compact` | Prune stale captures and old session state |
+
+All write commands support `--dry-run` and `--json`. Run `agent-knowledge --help` for the full list.
 
 ## Obsidian-ready
 
@@ -67,10 +151,26 @@ agent-knowledge export-canvas
 # produces: agent-knowledge/Outputs/knowledge-export.canvas
 ```
 
-The vault is designed to work well in Obsidian — good markdown, YAML frontmatter,
+The vault is designed to work well in Obsidian -- good markdown, YAML frontmatter,
 branch-note convention, internal links. But everything works without it too.
 
-### Automatic capture
+## Static site export
+
+Build a polished standalone site from your knowledge vault -- no Obsidian required:
+
+```bash
+agent-knowledge export-html       # generate
+agent-knowledge view              # generate and open in browser
+```
+
+The generated site includes an overview page, branch tree navigation, note detail
+view, evidence view, interactive graph view, and machine-readable `knowledge.json`
+and `graph.json`. Opens via `file://` with no server needed.
+
+Memory/ notes are always primary. Evidence and Outputs items are clearly marked
+non-canonical.
+
+## Automatic capture
 
 Every sync and update event is automatically recorded in `Evidence/captures/`
 as a small structured YAML file. This gives a lightweight history of what
@@ -79,260 +179,86 @@ changed and when -- without a database or background service.
 Captures are evidence, not memory. They accumulate quietly and can be pruned
 with `agent-knowledge compact`.
 
-### Progressive retrieval
+## Progressive retrieval
 
 The knowledge index (`Outputs/knowledge-index.json` and `.md`) is regenerated
-on every sync. It provides a compact catalog of all notes so agents can:
+on every sync. Agents can:
 
 1. Load the index first (cheap, a few KB)
 2. Identify relevant branches from the shortlist
 3. Load only the full note content they actually need
 
-Use `agent-knowledge search <query>` to run a quick Layer 2 shortlist query
-from the command line or a hook.
-
-## Project-local runtime
-
-The project carries everything it needs. Opening the repo in Cursor or Claude Code
-is enough to get automatic behavior — no manual prompting, no global config required.
-
-### Cursor
-
-| What is installed | What it does |
-|------------------|-------------|
-| `.cursor/rules/agent-knowledge.mdc` | Always-on rule: loads memory context on every session |
-| `.cursor/hooks.json` | Lifecycle hooks: sync on start, update on write, sync on stop and pre-compact |
-| `.cursor/commands/memory-update.md` | `/memory-update` slash command |
-| `.cursor/commands/system-update.md` | `/system-update` slash command |
-
-### Claude Code
-
-| What is installed | What it does |
-|------------------|-------------|
-| `.claude/settings.json` | Lifecycle hooks: sync on SessionStart, Stop, PreCompact |
-| `.claude/CLAUDE.md` | Runtime contract: knowledge layers, session protocol, onboarding |
-| `.claude/commands/memory-update.md` | `/memory-update` slash command |
-| `.claude/commands/system-update.md` | `/system-update` slash command |
-
-### Session lifecycle
-
-Hooks fire automatically in both Cursor and Claude Code:
-
-- **session start** — runs `agent-knowledge sync` to load fresh vault state
-- **post-write** (Cursor only) — runs `agent-knowledge update` after each file save
-- **stop** — runs `agent-knowledge sync` at end of each task
-- **pre-compact** — runs `agent-knowledge sync` before context compaction
-
-The runtime contract ensures the agent reads `STATUS.md` and `Memory/MEMORY.md` at the
-start of every session, with no manual prompting required.
-
-### Slash commands
-
-Inside any Cursor or Claude Code session in this project:
-
-- `/memory-update` — sync, review session work, write stable facts to `Memory/`, summarize
-- `/system-update` — refresh integration files to the latest framework version
-
-These are project-local. They work because `init` installed them in `.cursor/commands/`
-and `.claude/commands/`.
-
-### Integration health
-
-```bash
-agent-knowledge doctor
-```
-
-Reports whether Cursor and Claude integration files (rules, hooks, settings, commands)
-are all installed and current. If any file is stale or missing, `doctor` suggests
-`agent-knowledge refresh-system`.
-
-## Commands
-
-| Command | What it does |
-|---------|-------------|
-| `init` | Set up a project — one command, no arguments needed |
-| `sync` | Full sync: memory, history, git evidence, index |
-| `doctor` | Validate setup, integration health, version staleness |
-| `ship` | Validate + sync + commit + push |
-| `search <query>` | Search the knowledge index (Memory-first) |
-| `export-html` | Build a polished static site from the vault |
-| `view` | Build site and open in browser |
-| `clean-import <url>` | Import a URL as cleaned, non-canonical evidence |
-| `refresh-system` | Refresh all integration files to the current framework version |
-| `backfill-history` | Rebuild lightweight project history from git |
-| `compact` | Prune stale captures and old session state |
-
-All write commands support `--dry-run` and `--json`. Run `agent-knowledge --help` for the full command list.
-
-## Static site export with graph
-
-Build a polished standalone site from your knowledge vault — no Obsidian required:
-
-```
-agent-knowledge export-html
-# produces: agent-knowledge/Outputs/site/index.html
-#           agent-knowledge/Outputs/site/data/knowledge.json
-#           agent-knowledge/Outputs/site/data/graph.json
-```
-
-Or generate and open immediately:
-
-```
-agent-knowledge view
-# or
-agent-knowledge export-html --open
-```
-
-The generated site includes:
-- **Overview page** — project summary, branch cards, recent changes, key decisions, open questions
-- **Branch tree** — sidebar navigation across all Memory/ branches with leaf drill-down
-- **Note detail view** — rendered markdown with metadata panel and related notes
-- **Evidence view** — all imported material, clearly marked non-canonical
-- **Graph view** — interactive force-directed graph of all knowledge nodes and relationships
-- **Structured data** — `knowledge.json` and `graph.json` machine-readable models of the vault
-
-**Graph view** is a secondary exploration aid, not the primary navigation. The tree explorer and note detail view are the main interfaces. The graph shows:
-- Branches, leaf notes, decisions, evidence, and outputs as distinct node types
-- Structural edges (solid) and inferred relationships (dashed)
-- Color-coded node types with visual distinction between canonical (Memory) and non-canonical (Evidence/Outputs) content
-- Interactive zoom/pan, click-to-select with info panel, filter by node type and canonical status, and text search
-
-The graph is built from `graph.json`, which is derived from `knowledge.json`. Neither file is canonical truth.
-
-Memory/ notes are always primary. Evidence and Outputs items are clearly marked non-canonical. The site is a generated presentation layer — the vault remains the source of truth.
-
-The site is a single `index.html` with all data embedded as JS variables, so it opens correctly via `file://` without any server.
-
-## Skills
-
-agent-knowledge ships a set of focused, composable agent skills. Install them globally:
-
-```
-agent-knowledge setup
-```
-
-Skills installed to `~/.cursor/skills/`:
-
-| Skill | Purpose |
-|-------|---------|
-| `memory-management` | Session-start: tree structure, reading, writeback |
-| `project-memory-writing` | How to write high-quality memory notes |
-| `branch-note-convention` | Naming and structure convention |
-| `ontology-inference` | Infer project ontology from the repo |
-| `decision-recording` | Record architectural decisions as ADRs |
-| `evidence-handling` | Evidence rules and promotion process |
-| `clean-web-import` | Import web content cleanly |
-| `obsidian-compatible-writing` | Optional Obsidian-friendly authoring |
-| `session-management` | Session tracking and handoffs |
-| `memory-compaction` | Prune stale notes |
-| `project-ontology-bootstrap` | Bootstrap a new memory tree |
-
-Skills are plain markdown files and work with any skill-compatible agent
-(Cursor, Claude Code, Codex). See `assets/skills/SKILLS.md` for details.
+Use `agent-knowledge search <query>` for a quick shortlist query from the
+command line or a hook.
 
 ## Clean web import
 
 Import a web page as cleaned, non-canonical evidence:
 
-```
+```bash
 agent-knowledge clean-import https://docs.example.com/api-reference
 # produces: agent-knowledge/Evidence/imports/2025-01-15-api-reference.md
 ```
 
 Strips navigation, ads, scripts, and boilerplate. Writes clean markdown with
-YAML frontmatter marking it as non-canonical. Verify facts before promoting
-any content to Memory/.
-
-
-## Multi-Tool Support
-
-`init` always installs both Cursor and Claude integration. Codex is installed when detected:
-
-| Tool | Bridge files | When installed |
-|------|-------------|---------------|
-| Cursor | `.cursor/rules/` + `.cursor/hooks.json` + `.cursor/commands/` | Always |
-| Claude | `.claude/settings.json` + `.claude/CLAUDE.md` + `.claude/commands/` | Always |
-| Codex | `.codex/AGENTS.md` | When `.codex/` directory is detected |
-
-Multiple tools in the same repo work together. Integration files are inert when
-the respective tool is not in use.
-
-## Custom Knowledge Home
-
-```bash
-export AGENT_KNOWLEDGE_HOME=~/my-knowledge
-agent-knowledge init
-```
+YAML frontmatter marking it as non-canonical.
 
 ## Project history
 
 `init` automatically backfills a lightweight history layer when run on an existing repo.
-You can also run it explicitly at any time:
+You can also run it explicitly:
 
 ```bash
 agent-knowledge backfill-history
 ```
 
-This creates `History/` inside the vault with:
+Creates `History/events.ndjson` (append-only event log), `History/history.md`
+(human-readable summary), and `History/timeline/` (sparse milestone notes).
 
-- `events.ndjson` — compact append-only event log (one JSON object per line)
-- `history.md` — human-readable entrypoint with recent milestones
-- `timeline/` — sparse milestone notes for significant events (init, releases)
-
-History records **what happened** over time — releases, detected integrations, sync
-events. It is not a git replacement and not a second source of truth. Current truth
-lives in `Memory/`.
-
-| Layer | Role |
-|-------|------|
-| `Memory/` | What is true now (curated, authoritative) |
-| `History/` | What happened over time (lightweight diary) |
-| `Evidence/` | Imported/extracted material (non-canonical) |
-| `Outputs/` | Generated helper artifacts |
-| `Sessions/` | Temporary working state |
-
-History is idempotent. Run `backfill-history --dry-run` to preview without writing.
-`doctor` warns when `History/` is missing.
+History records what happened over time -- releases, integrations, sync events.
+It is not a git replacement. Current truth lives in `Memory/`.
 
 ## Keeping up to date
-
-When a new version of agent-knowledge is installed, refresh the project integration:
 
 ```bash
 pip install -U agent-knowledge-cli
 agent-knowledge refresh-system
 ```
 
-`refresh-system` updates all integration bridge files — Cursor hooks/rules/commands, Claude settings/commands/contract, `AGENTS.md` header, Codex config — and version markers in `STATUS.md` and `.agent-project.yaml`. It never touches `Memory/`, `Evidence/`, `Sessions/`, or any curated project knowledge.
+`refresh-system` updates all integration files -- Claude settings/commands/contract,
+Cursor hooks/rules/commands, `AGENTS.md` header, Codex config -- and version markers.
+It never touches `Memory/`, `Evidence/`, `Sessions/`, or any curated knowledge.
 
-Run `--dry-run` to preview changes without writing:
+`doctor` warns when the project integration is behind the installed version.
+
+## Custom knowledge home
 
 ```bash
-agent-knowledge refresh-system --dry-run
+export AGENT_KNOWLEDGE_HOME=~/my-knowledge
+agent-knowledge init
 ```
-
-`doctor` also warns when the project integration is behind the installed version.
 
 ## Troubleshooting
 
 ```bash
 agent-knowledge doctor          # validate setup and report health
 agent-knowledge doctor --json   # machine-readable health check
-agent-knowledge validate        # check knowledge layout and links
 ```
 
 Common issues:
 - `./agent-knowledge` missing: run `agent-knowledge init`
 - Onboarding still pending: paste the init prompt into your agent
-- Stale index: run `agent-knowledge index` or `agent-knowledge sync`
+- Claude not picking up memory: check `.claude/settings.json` exists -- run `agent-knowledge refresh-system`
+- Cursor hooks not firing: check `.cursor/hooks.json` exists -- run `agent-knowledge refresh-system`
+- Stale index: run `agent-knowledge sync`
 - Large notes: run `agent-knowledge compact`
-- **Wrong binary**: another tool (e.g. graphify) may install a Node.js `agent-knowledge` that shadows ours. Check with `which -a agent-knowledge`. Fix: add the Python bin to PATH before nvm — `export PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"` — or invoke directly: `python3 -m agent_knowledge`
+- **Wrong binary**: another tool may install a Node.js `agent-knowledge` that shadows ours. Check with `which -a agent-knowledge`. Fix: `export PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"`
 
-## Platform Support
+## Platform support
 
 - **macOS** and **Linux** are fully supported.
 - **Windows** is not currently supported (relies on `bash` and POSIX shell scripts).
-- Python 3.9+ is required.
+- Python 3.9+ required.
 
 ## Package naming
 
@@ -341,9 +267,6 @@ Common issues:
 | PyPI package | `agent-knowledge-cli` |
 | CLI command | `agent-knowledge` |
 | Python import | `agent_knowledge` |
-
-Install: `pip install agent-knowledge-cli`
-Command: `agent-knowledge --help`
 
 ## Development
 
