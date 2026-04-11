@@ -192,6 +192,21 @@ def test_skills_index_bundled():
     assert index.is_file(), "assets/skills/SKILLS.md must be bundled"
 
 
+def test_bundled_cursor_command_templates_exist():
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    assets = get_assets_dir()
+    for cmd in ("memory-update.md", "system-update.md"):
+        path = assets / "templates" / "integrations" / "cursor" / "commands" / cmd
+        assert path.is_file(), f"Cursor command template missing: {path}"
+
+
+def test_refresh_module_has_check_cursor_integration():
+    from agent_knowledge.runtime.refresh import check_cursor_integration
+
+    assert callable(check_cursor_integration)
+
+
 def test_readme_mentions_obsidian_optional():
     """README must make clear Obsidian is optional."""
     readme = (

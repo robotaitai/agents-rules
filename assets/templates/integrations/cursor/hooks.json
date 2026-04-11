@@ -11,6 +11,16 @@
       "name": "project-knowledge-session-start",
       "event": "session-start",
       "command": "agent-knowledge sync --project <repo-path>"
+    },
+    {
+      "name": "project-knowledge-stop",
+      "event": "stop",
+      "command": "agent-knowledge sync --project <repo-path>"
+    },
+    {
+      "name": "project-knowledge-pre-compact",
+      "event": "preCompact",
+      "command": "agent-knowledge sync --project <repo-path>"
     }
   ]
 }

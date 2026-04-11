@@ -1,11 +1,26 @@
 {
   "version": 1,
-  "description": "Repo-local hook for agent-knowledge sync.",
+  "description": "Repo-local hooks for agent-knowledge. Hooks stay thin: detect meaningful changes and trigger lightweight capture/update, never rebuild the full ontology.",
   "hooks": [
     {
       "name": "project-knowledge-sync",
       "event": "post-write",
       "command": "agent-knowledge update --summary-file <repo-path>/.cursor/knowledge-sync.last.json --project <repo-path>"
+    },
+    {
+      "name": "project-knowledge-session-start",
+      "event": "session-start",
+      "command": "agent-knowledge sync --project <repo-path>"
+    },
+    {
+      "name": "project-knowledge-stop",
+      "event": "stop",
+      "command": "agent-knowledge sync --project <repo-path>"
+    },
+    {
+      "name": "project-knowledge-pre-compact",
+      "event": "preCompact",
+      "command": "agent-knowledge sync --project <repo-path>"
     }
   ]
 }

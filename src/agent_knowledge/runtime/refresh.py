@@ -216,6 +216,37 @@ def _refresh_claude_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
     return {"target": "CLAUDE.md", "action": action, "detail": "refreshed from bundled template"}
 
 
+def _refresh_cursor_commands(repo_root: Path, *, dry_run: bool) -> list[dict[str, Any]]:
+    """Refresh .cursor/commands/ from the bundled templates."""
+    commands_dir = repo_root / ".cursor" / "commands"
+    template_dir = get_assets_dir() / "templates" / "integrations" / "cursor" / "commands"
+    results: list[dict[str, Any]] = []
+
+    if not template_dir.is_dir():
+        return [{"target": ".cursor/commands/", "action": "skip", "detail": "no bundled command templates"}]
+
+    for template_file in sorted(template_dir.glob("*.md")):
+        rel = f".cursor/commands/{template_file.name}"
+        target = commands_dir / template_file.name
+
+        if not target.exists():
+            action = _write(target, template_file.read_text(), dry_run=dry_run)
+            results.append({"target": rel, "action": action, "detail": "created from bundled template"})
+            continue
+
+        template_content = template_file.read_text()
+        current_content = target.read_text(errors="replace")
+
+        if current_content.strip() == template_content.strip():
+            results.append({"target": rel, "action": "up-to-date", "detail": "command is current"})
+            continue
+
+        action = _write(target, template_content, dry_run=dry_run)
+        results.append({"target": rel, "action": action, "detail": "refreshed from bundled template"})
+
+    return results
+
+
 def _refresh_codex_agents_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
     """Refresh .codex/AGENTS.md from the bundled template."""
     target = repo_root / ".codex" / "AGENTS.md"
@@ -316,6 +347,74 @@ def is_stale(repo_root: Path) -> tuple[bool, str | None, str]:
 
 
 # --------------------------------------------------------------------------- #
+# Integration health check (used by doctor)                                   #
+# --------------------------------------------------------------------------- #
+
+
+def check_cursor_integration(repo_root: Path) -> dict[str, Any]:
+    """Check Cursor integration completeness.
+
+    Returns a dict with 'healthy' bool, 'issues' list, and 'info' detail dict.
+    """
+    from agent_knowledge.runtime.integrations import (
+        CURSOR_EXPECTED_COMMANDS,
+        CURSOR_EXPECTED_HOOK_EVENTS,
+    )
+
+    issues: list[str] = []
+    info: dict[str, Any] = {}
+
+    # Rule
+    rule = repo_root / ".cursor" / "rules" / "agent-knowledge.mdc"
+    info["rule_installed"] = rule.is_file()
+    if not rule.is_file():
+        issues.append("Missing .cursor/rules/agent-knowledge.mdc -- run: agent-knowledge refresh-system")
+
+    # Hooks
+    hooks_file = repo_root / ".cursor" / "hooks.json"
+    info["hooks_installed"] = hooks_file.is_file()
+    if hooks_file.is_file():
+        try:
+            hooks_data = json.loads(hooks_file.read_text())
+            events = {h.get("event") for h in hooks_data.get("hooks", [])}
+            missing_events = CURSOR_EXPECTED_HOOK_EVENTS - events
+            info["hook_events"] = sorted(events - {None})
+            info["missing_hook_events"] = sorted(missing_events)
+            if missing_events:
+                issues.append(
+                    f"Hooks missing events: {', '.join(sorted(missing_events))} "
+                    f"-- run: agent-knowledge refresh-system"
+                )
+        except (json.JSONDecodeError, ValueError):
+            issues.append("Invalid .cursor/hooks.json -- run: agent-knowledge refresh-system")
+            info["hook_events"] = []
+            info["missing_hook_events"] = sorted(CURSOR_EXPECTED_HOOK_EVENTS)
+    else:
+        issues.append("Missing .cursor/hooks.json -- run: agent-knowledge init")
+        info["hook_events"] = []
+        info["missing_hook_events"] = sorted(CURSOR_EXPECTED_HOOK_EVENTS)
+
+    # Commands
+    commands_dir = repo_root / ".cursor" / "commands"
+    installed_commands = [f for f in CURSOR_EXPECTED_COMMANDS if (commands_dir / f).is_file()]
+    missing_commands = [f for f in sorted(CURSOR_EXPECTED_COMMANDS) if f not in installed_commands]
+    info["commands_installed"] = sorted(installed_commands)
+    info["commands_missing"] = missing_commands
+    if missing_commands:
+        issues.append(
+            f"Missing Cursor commands: {', '.join(missing_commands)} "
+            f"-- run: agent-knowledge refresh-system"
+        )
+
+    return {
+        "integration": "cursor",
+        "info": info,
+        "issues": issues,
+        "healthy": len(issues) == 0,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Main entry point                                                             #
 # --------------------------------------------------------------------------- #
 
@@ -358,6 +457,9 @@ def run_refresh(
 
     r = _refresh_cursor_rule(repo_root, dry_run=dry_run)
     changes.append(r)
+
+    for r in _refresh_cursor_commands(repo_root, dry_run=dry_run):
+        changes.append(r)
 
     # Claude integration (if detected)
     if detected.get("claude"):

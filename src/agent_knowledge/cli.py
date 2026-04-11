@@ -293,7 +293,7 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
     Reports whether the project integration is stale and suggests
     `agent-knowledge refresh-system` when the framework version has changed.
     """
-    from agent_knowledge.runtime.refresh import is_stale
+    from agent_knowledge.runtime.refresh import is_stale, check_cursor_integration
     from agent_knowledge.runtime.history import history_exists
 
     repo_root = Path(project).resolve()
@@ -315,6 +315,13 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
                 fg="yellow",
                 err=True,
             )
+        click.echo("", err=True)
+
+    # Cursor integration health check
+    integration = check_cursor_integration(repo_root)
+    if not integration["healthy"] and not json_mode:
+        for issue in integration["issues"]:
+            click.secho(f"Warning: {issue}", fg="yellow", err=True)
         click.echo("", err=True)
 
     # History existence check

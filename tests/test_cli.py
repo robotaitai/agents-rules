@@ -1461,3 +1461,235 @@ def test_core_cli_flow_unchanged(tmp_path: Path):
     for f in memory_dir.rglob("*"):
         if f.suffix in (".canvas", ".json", ".html"):
             pytest.fail(f"Non-markdown file found in Memory/: {f}")
+
+
+# -- Cursor-first runtime tests -------------------------------------------- #
+
+
+def test_init_installs_cursor_commands(tmp_path: Path):
+    """init must create .cursor/commands/ with memory-update and system-update."""
+    repo = _init_repo(tmp_path, "cursor-cmds")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0, f"init failed: {r.stderr}"
+    assert (repo / ".cursor" / "commands" / "memory-update.md").is_file(), \
+        "memory-update.md must be installed in .cursor/commands/"
+    assert (repo / ".cursor" / "commands" / "system-update.md").is_file(), \
+        "system-update.md must be installed in .cursor/commands/"
+
+
+def test_cursor_commands_reference_installed_runtime(tmp_path: Path):
+    """Cursor command files must reference 'agent-knowledge', not repo-relative paths."""
+    repo = _init_repo(tmp_path, "cmd-runtime")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    for cmd_name in ("memory-update.md", "system-update.md"):
+        cmd_file = repo / ".cursor" / "commands" / cmd_name
+        assert cmd_file.is_file(), f"{cmd_name} must be installed"
+        content = cmd_file.read_text()
+        assert "agent-knowledge" in content, \
+            f"{cmd_name} must reference the installed 'agent-knowledge' CLI"
+        # Must not use repo-relative script paths
+        assert "scripts/" not in content, \
+            f"{cmd_name} must not use repo-relative scripts/"
+
+
+def test_memory_update_command_covers_sync(tmp_path: Path):
+    """/memory-update command must instruct the agent to run agent-knowledge sync."""
+    repo = _init_repo(tmp_path, "mem-cmd")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    content = (repo / ".cursor" / "commands" / "memory-update.md").read_text()
+    assert "sync" in content.lower(), "memory-update must mention sync"
+    assert "Memory" in content, "memory-update must mention Memory/"
+
+
+def test_hooks_have_all_expected_events(tmp_path: Path):
+    """hooks.json must have session-start, post-write, stop, and preCompact events."""
+    repo = _init_repo(tmp_path, "hooks-events")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0, f"init failed: {r.stderr}"
+
+    hooks_file = repo / ".cursor" / "hooks.json"
+    assert hooks_file.is_file()
+    data = json.loads(hooks_file.read_text())
+    events = {h["event"] for h in data.get("hooks", [])}
+    assert "session-start" in events, "hooks.json must have session-start"
+    assert "post-write" in events, "hooks.json must have post-write"
+    assert "stop" in events, "hooks.json must have stop"
+    assert "preCompact" in events, "hooks.json must have preCompact"
+
+
+def test_hooks_reference_installed_runtime(tmp_path: Path):
+    """All hooks must call 'agent-knowledge', not repo-relative scripts."""
+    repo = _init_repo(tmp_path, "hooks-runtime")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    data = json.loads((repo / ".cursor" / "hooks.json").read_text())
+    for hook in data.get("hooks", []):
+        cmd = hook.get("command", "")
+        assert cmd.startswith("agent-knowledge "), \
+            f"Hook '{hook['name']}' must call agent-knowledge, got: {cmd}"
+
+
+def test_refresh_system_installs_commands(tmp_path: Path):
+    """refresh-system must install command files if they are missing."""
+    repo = _init_repo(tmp_path, "refresh-cmds")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Remove commands directory to simulate stale install
+    import shutil
+    cmds_dir = repo / ".cursor" / "commands"
+    if cmds_dir.is_dir():
+        shutil.rmtree(cmds_dir)
+    assert not cmds_dir.is_dir()
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+    # After refresh, commands should be created
+    assert (cmds_dir / "memory-update.md").is_file()
+    assert (cmds_dir / "system-update.md").is_file()
+
+
+def test_refresh_system_updates_stale_hooks(tmp_path: Path):
+    """refresh-system must update hooks.json if it lacks the expected events."""
+    repo = _init_repo(tmp_path, "refresh-hooks")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Write a stale hooks.json with only old events
+    hooks_file = repo / ".cursor" / "hooks.json"
+    old_hooks = {
+        "version": 1,
+        "hooks": [
+            {"name": "old", "event": "post-write", "command": f"agent-knowledge update --project {repo}"},
+        ],
+    }
+    hooks_file.write_text(json.dumps(old_hooks))
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0
+    data = json.loads(hooks_file.read_text())
+    events = {h["event"] for h in data.get("hooks", [])}
+    assert "stop" in events, "refresh-system must add stop hook"
+    assert "preCompact" in events, "refresh-system must add preCompact hook"
+
+
+def test_check_cursor_integration_healthy_after_init(tmp_path: Path):
+    """check_cursor_integration must report healthy after init."""
+    from agent_knowledge.runtime.refresh import check_cursor_integration
+
+    repo = _init_repo(tmp_path, "integration-check")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    result = check_cursor_integration(repo)
+    assert result["integration"] == "cursor"
+    assert result["healthy"], f"Expected healthy, got issues: {result['issues']}"
+    assert result["info"]["rule_installed"]
+    assert result["info"]["hooks_installed"]
+    assert len(result["info"]["missing_hook_events"]) == 0
+    assert len(result["info"]["commands_missing"]) == 0
+
+
+def test_check_cursor_integration_reports_missing_commands(tmp_path: Path):
+    """check_cursor_integration must flag missing command files."""
+    from agent_knowledge.runtime.refresh import check_cursor_integration
+
+    repo = _init_repo(tmp_path, "integration-missing")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Remove commands
+    import shutil
+    shutil.rmtree(repo / ".cursor" / "commands")
+
+    result = check_cursor_integration(repo)
+    assert not result["healthy"]
+    assert len(result["info"]["commands_missing"]) > 0
+    assert any("commands" in issue.lower() for issue in result["issues"])
+
+
+def test_check_cursor_integration_reports_missing_hooks(tmp_path: Path):
+    """check_cursor_integration must flag missing hook events."""
+    from agent_knowledge.runtime.refresh import check_cursor_integration
+
+    repo = _init_repo(tmp_path, "integration-hooks-missing")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Write incomplete hooks
+    hooks_file = repo / ".cursor" / "hooks.json"
+    hooks_file.write_text(json.dumps({"version": 1, "hooks": [{"name": "x", "event": "post-write", "command": "echo"}]}))
+
+    result = check_cursor_integration(repo)
+    assert not result["healthy"]
+    missing = result["info"]["missing_hook_events"]
+    assert "stop" in missing
+    assert "preCompact" in missing
+
+
+def test_cursor_rule_contains_knowledge_layers(tmp_path: Path):
+    """The installed Cursor rule must describe all knowledge layers."""
+    repo = _init_repo(tmp_path, "rule-content")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    rule = (repo / ".cursor" / "rules" / "agent-knowledge.mdc").read_text()
+    assert "Memory/" in rule
+    assert "Evidence/" in rule
+    assert "Outputs/" in rule
+    assert "Sessions/" in rule
+    assert "History/" in rule
+    assert "alwaysApply: true" in rule
+
+
+def test_cursor_rule_mentions_memory_update_command(tmp_path: Path):
+    """The installed Cursor rule must mention /memory-update."""
+    repo = _init_repo(tmp_path, "rule-cmd-ref")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    rule = (repo / ".cursor" / "rules" / "agent-knowledge.mdc").read_text()
+    assert "/memory-update" in rule
+
+
+def test_init_cursor_integration_idempotent(tmp_path: Path):
+    """Running init twice must not break .cursor/ integration files."""
+    repo = _init_repo(tmp_path, "idem-cursor")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Record content after first init
+    rule_content = (repo / ".cursor" / "rules" / "agent-knowledge.mdc").read_text()
+    hooks_content = (repo / ".cursor" / "hooks.json").read_text()
+
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Content must be unchanged (not force-overwritten)
+    assert (repo / ".cursor" / "rules" / "agent-knowledge.mdc").read_text() == rule_content
+    assert (repo / ".cursor" / "hooks.json").read_text() == hooks_content
+
+
+def test_bundled_cursor_commands_exist():
+    """Cursor command templates must be bundled in the package assets."""
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    assets = get_assets_dir()
+    for cmd in ("memory-update.md", "system-update.md"):
+        path = assets / "templates" / "integrations" / "cursor" / "commands" / cmd
+        assert path.is_file(), f"Bundled cursor command missing: {path}"
+        content = path.read_text()
+        assert "agent-knowledge" in content, f"{cmd} must reference agent-knowledge CLI"
+
+
+def test_check_cursor_integration_importable():
+    """check_cursor_integration must be importable from refresh module."""
+    from agent_knowledge.runtime.refresh import check_cursor_integration
+
+    assert callable(check_cursor_integration)

@@ -7,6 +7,12 @@ from pathlib import Path
 
 from .paths import get_assets_dir
 
+# Expected Cursor hook events — used by integration health checks.
+CURSOR_EXPECTED_HOOK_EVENTS = {"session-start", "post-write", "stop", "preCompact"}
+
+# Expected Cursor command files.
+CURSOR_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}
+
 TOOLS = ("cursor", "claude", "codex")
 
 
@@ -33,16 +39,37 @@ def _copy_template(src: Path, dst: Path, replacements: dict[str, str], *, force:
 
 _CURSOR_RULE = """\
 ---
-description: Agent knowledge system -- read on every session
+description: agent-knowledge -- project memory contract, always active
 alwaysApply: true
 ---
 
-This project uses agent-knowledge for persistent memory.
+This project uses **agent-knowledge** for persistent memory.
+All knowledge lives in `./agent-knowledge/` (symlink to external vault).
 
-On session start:
+## On session start
+
 1. Read `./agent-knowledge/STATUS.md`
-2. If `onboarding: pending`, read `AGENTS.md` and follow the First-Time Onboarding instructions
-3. If `onboarding: complete`, read `./agent-knowledge/Memory/MEMORY.md` for project context
+2. If `onboarding: pending` — read `AGENTS.md` and perform First-Time Onboarding
+3. If `onboarding: complete` — read `./agent-knowledge/Memory/MEMORY.md`
+   - Load branch notes relevant to the current task
+   - Scan `./agent-knowledge/History/history.md` for recent activity if useful
+
+## Knowledge layers
+
+| Layer | Canonical? | Use for |
+|-------|-----------|---------|
+| `Memory/` | Yes | Stable project truth — write here |
+| `History/` | Yes (diary) | What happened over time |
+| `Evidence/` | No | Raw imports — never promote to Memory |
+| `Outputs/` | No | Generated views — never treat as truth |
+| `Sessions/` | No | Temporary state — prune aggressively |
+
+## After meaningful work
+
+- Write confirmed facts to `./agent-knowledge/Memory/<branch>.md`
+- Run `/memory-update` or `agent-knowledge sync --project .`
+
+Keep ontology small and project-native. Do not force generic templates.
 """
 
 
@@ -75,6 +102,22 @@ def install_cursor(repo: Path, *, dry_run: bool = False, force: bool = False) ->
         rule_dst.parent.mkdir(parents=True, exist_ok=True)
         rule_dst.write_text(_CURSOR_RULE)
         actions.append("  created: .cursor/rules/agent-knowledge.mdc")
+
+    # Commands
+    commands_template_dir = assets / "templates" / "integrations" / "cursor" / "commands"
+    if commands_template_dir.is_dir():
+        commands_dst_dir = repo / ".cursor" / "commands"
+        for cmd_src in sorted(commands_template_dir.glob("*.md")):
+            cmd_dst = commands_dst_dir / cmd_src.name
+            rel = f".cursor/commands/{cmd_src.name}"
+            if cmd_dst.exists() and not force:
+                actions.append(f"  exists: {rel}")
+            elif dry_run:
+                actions.append(f"  [dry-run] would create: {rel}")
+            else:
+                commands_dst_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(cmd_src, cmd_dst)
+                actions.append(f"  created: {rel}")
 
     return actions
 
