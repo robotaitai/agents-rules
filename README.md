@@ -21,16 +21,15 @@ cd your-project
 agent-knowledge init
 ```
 
-Open Cursor — the agent picks up from there automatically.
+Open Cursor or Claude Code — the agent picks up from there automatically.
 
 `init` does everything in one shot:
 - infers the project slug from the directory name
 - creates an external knowledge vault at `~/agent-os/projects/<slug>/`
 - symlinks `./agent-knowledge` into the repo as the local handle
-- installs `.cursor/rules/agent-knowledge.mdc` — always-on memory contract
-- installs `.cursor/hooks.json` — session lifecycle (start, stop, compaction)
-- installs `.cursor/commands/memory-update.md` and `system-update.md` — slash commands
-- detects Claude and Codex and installs their bridge files if present
+- installs Cursor integration: `.cursor/rules/`, `.cursor/hooks.json`, `.cursor/commands/`
+- installs Claude integration: `.claude/settings.json`, `.claude/CLAUDE.md`, `.claude/commands/`
+- detects Codex and installs its bridge files if present
 - bootstraps the memory tree and marks onboarding as `pending`
 - imports repo history into `Evidence/` automatically
 - backfills lightweight history from git
@@ -92,10 +91,12 @@ on every sync. It provides a compact catalog of all notes so agents can:
 Use `agent-knowledge search <query>` to run a quick Layer 2 shortlist query
 from the command line or a hook.
 
-## Cursor-first runtime
+## Project-local runtime
 
-Cursor is the primary supported runtime path. The project carries everything
-it needs — opening the repo in Cursor is enough to get automatic behavior:
+The project carries everything it needs. Opening the repo in Cursor or Claude Code
+is enough to get automatic behavior — no manual prompting, no global config required.
+
+### Cursor
 
 | What is installed | What it does |
 |------------------|-------------|
@@ -104,26 +105,36 @@ it needs — opening the repo in Cursor is enough to get automatic behavior:
 | `.cursor/commands/memory-update.md` | `/memory-update` slash command |
 | `.cursor/commands/system-update.md` | `/system-update` slash command |
 
+### Claude Code
+
+| What is installed | What it does |
+|------------------|-------------|
+| `.claude/settings.json` | Lifecycle hooks: sync on SessionStart, Stop, PreCompact |
+| `.claude/CLAUDE.md` | Runtime contract: knowledge layers, session protocol, onboarding |
+| `.claude/commands/memory-update.md` | `/memory-update` slash command |
+| `.claude/commands/system-update.md` | `/system-update` slash command |
+
 ### Session lifecycle
 
-When you open the project in Cursor, the hooks fire automatically:
+Hooks fire automatically in both Cursor and Claude Code:
 
-- **session-start** — runs `agent-knowledge sync` to load fresh vault state
-- **post-write** — runs `agent-knowledge update` after each file save
+- **session start** — runs `agent-knowledge sync` to load fresh vault state
+- **post-write** (Cursor only) — runs `agent-knowledge update` after each file save
 - **stop** — runs `agent-knowledge sync` at end of each task
-- **preCompact** — runs `agent-knowledge sync` before context compaction
+- **pre-compact** — runs `agent-knowledge sync` before context compaction
 
-The rule ensures the agent reads `STATUS.md` and `Memory/MEMORY.md` at the
+The runtime contract ensures the agent reads `STATUS.md` and `Memory/MEMORY.md` at the
 start of every session, with no manual prompting required.
 
 ### Slash commands
 
-Inside any Cursor session in this project:
+Inside any Cursor or Claude Code session in this project:
 
 - `/memory-update` — sync, review session work, write stable facts to `Memory/`, summarize
 - `/system-update` — refresh integration files to the latest framework version
 
-These are project-local. They work because `init` installed them in `.cursor/commands/`.
+These are project-local. They work because `init` installed them in `.cursor/commands/`
+and `.claude/commands/`.
 
 ### Integration health
 
@@ -131,8 +142,9 @@ These are project-local. They work because `init` installed them in `.cursor/com
 agent-knowledge doctor
 ```
 
-Reports whether rules, hooks, and commands are all installed and current.
-If any file is stale or missing, `doctor` suggests `agent-knowledge refresh-system`.
+Reports whether Cursor and Claude integration files (rules, hooks, settings, commands)
+are all installed and current. If any file is stale or missing, `doctor` suggests
+`agent-knowledge refresh-system`.
 
 ## Commands
 
@@ -234,15 +246,16 @@ any content to Memory/.
 
 ## Multi-Tool Support
 
-`init` always installs Cursor integration. Claude and Codex are installed when detected:
+`init` always installs both Cursor and Claude integration. Codex is installed when detected:
 
 | Tool | Bridge files | When installed |
 |------|-------------|---------------|
 | Cursor | `.cursor/rules/` + `.cursor/hooks.json` + `.cursor/commands/` | Always |
-| Claude | `CLAUDE.md` | When `.claude/` directory is detected |
+| Claude | `.claude/settings.json` + `.claude/CLAUDE.md` + `.claude/commands/` | Always |
 | Codex | `.codex/AGENTS.md` | When `.codex/` directory is detected |
 
-Multiple tools in the same repo work together.
+Multiple tools in the same repo work together. Integration files are inert when
+the respective tool is not in use.
 
 ## Custom Knowledge Home
 
@@ -290,7 +303,7 @@ pip install -U agent-knowledge-cli
 agent-knowledge refresh-system
 ```
 
-`refresh-system` updates all integration bridge files — Cursor hooks, rules, commands, `AGENTS.md` header, `CLAUDE.md`, Codex config — and version markers in `STATUS.md` and `.agent-project.yaml`. It never touches `Memory/`, `Evidence/`, `Sessions/`, or any curated project knowledge.
+`refresh-system` updates all integration bridge files — Cursor hooks/rules/commands, Claude settings/commands/contract, `AGENTS.md` header, Codex config — and version markers in `STATUS.md` and `.agent-project.yaml`. It never touches `Memory/`, `Evidence/`, `Sessions/`, or any curated project knowledge.
 
 Run `--dry-run` to preview changes without writing:
 

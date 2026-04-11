@@ -1,47 +1,29 @@
-# Agent Knowledge
+# agent-knowledge
 
-This project uses agent-knowledge for persistent project memory.
-Read `AGENTS.md` for knowledge management instructions.
-Check `./agent-knowledge/STATUS.md` for onboarding state.
+This project uses **agent-knowledge** for persistent project memory.
+All knowledge lives in `./agent-knowledge/` (symlink to external vault).
 
-If onboarding is pending, follow the instructions in AGENTS.md before other work.
+## On session start
 
-## Session Start
+1. Read `./agent-knowledge/STATUS.md`
+2. If `onboarding: pending` -- read `AGENTS.md` and perform First-Time Onboarding
+3. If `onboarding: complete` -- read `./agent-knowledge/Memory/MEMORY.md`
+   - Load branch notes relevant to the current task
+   - Scan `./agent-knowledge/History/history.md` for recent activity if useful
 
-Run at the beginning of each session:
+## Knowledge layers
 
-```bash
-agent-knowledge sync --project .
-```
+| Layer | Canonical? | Use for |
+|-------|-----------|---------|
+| `Memory/` | Yes | Stable project truth -- write here |
+| `History/` | Yes (diary) | What happened over time |
+| `Evidence/` | No | Raw imports -- never promote to Memory |
+| `Outputs/` | No | Generated views -- never treat as truth |
+| `Sessions/` | No | Temporary state -- prune aggressively |
 
-This syncs memory branches, rolls up sessions, refreshes git evidence, and updates the knowledge index.
+## After meaningful work
 
-## Memory Maintenance
+- Write confirmed facts to `./agent-knowledge/Memory/<branch>.md`
+- Run `/memory-update` or `agent-knowledge sync --project .`
 
-After completing meaningful work in a session:
-
-1. Write updated facts directly to `./agent-knowledge/Memory/<branch>.md`
-   - Update the relevant branch note (architecture, cli, testing, etc.)
-   - Add a dated entry to the `Recent Changes` section
-   - Update `./agent-knowledge/Memory/MEMORY.md` if branch summaries changed
-2. Run `agent-knowledge sync --project .` to propagate changes
-
-Write to memory when:
-- An architectural decision was made
-- A new command, module, or feature was completed
-- A gotcha or constraint was discovered
-- A pattern or convention was confirmed
-- The test count or CI setup changed
-
-Do NOT write to memory for:
-- Read-only exploration with no new conclusions
-- Speculative or unconfirmed changes
-- Session-specific context that won't matter next session
-
-## Knowledge Structure
-
-- `./agent-knowledge/Memory/` -- Canonical project knowledge (write here)
-- `./agent-knowledge/Evidence/` -- Non-canonical: imports, extracts (never promote to Memory)
-- `./agent-knowledge/Outputs/` -- Generated views, site, index (never canonical)
-- `./agent-knowledge/Sessions/` -- Temporary working state
-- `./agent-knowledge/History/` -- Lightweight diary, events, releases
+Keep ontology small and project-native. Do not force generic templates.

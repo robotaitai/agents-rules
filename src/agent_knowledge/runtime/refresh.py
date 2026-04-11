@@ -180,22 +180,50 @@ def _refresh_cursor_rule(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
     return {"target": ".cursor/rules/agent-knowledge.mdc", "action": action, "detail": "refreshed from bundled template"}
 
 
+def _refresh_claude_settings(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Refresh .claude/settings.json from the bundled template (with repo-path substitution)."""
+    target = repo_root / ".claude" / "settings.json"
+    template_path = get_assets_dir() / "templates" / "integrations" / "claude" / "settings.json"
+
+    if not template_path.is_file():
+        return {"target": ".claude/settings.json", "action": "skip", "detail": "bundled template not found"}
+
+    if not target.is_file():
+        return {"target": ".claude/settings.json", "action": "skip", "detail": "not installed; run: agent-knowledge init"}
+
+    repo_abs = str(repo_root.resolve())
+    template_content = template_path.read_text().replace("<repo-path>", repo_abs)
+    current_content = target.read_text(errors="replace")
+
+    tmpl_obj = _normalize_json(template_content)
+    curr_obj = _normalize_json(current_content)
+
+    if tmpl_obj is None or curr_obj is None:
+        return {"target": ".claude/settings.json", "action": "skip", "detail": "could not parse JSON"}
+
+    if tmpl_obj == curr_obj:
+        return {"target": ".claude/settings.json", "action": "up-to-date", "detail": "settings match current template"}
+
+    action = _write(target, template_content, dry_run=dry_run)
+    return {"target": ".claude/settings.json", "action": action, "detail": "refreshed from bundled template"}
+
+
 def _refresh_claude_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
-    """Refresh CLAUDE.md if it matches the bundled template; warn if customized."""
-    target = repo_root / "CLAUDE.md"
+    """Refresh .claude/CLAUDE.md if it matches the bundled template; warn if customized."""
+    target = repo_root / ".claude" / "CLAUDE.md"
     template_path = get_assets_dir() / "templates" / "integrations" / "claude" / "CLAUDE.md"
 
     if not template_path.is_file():
-        return {"target": "CLAUDE.md", "action": "skip", "detail": "bundled template not found"}
+        return {"target": ".claude/CLAUDE.md", "action": "skip", "detail": "bundled template not found"}
 
     if not target.is_file():
-        return {"target": "CLAUDE.md", "action": "skip", "detail": "not installed; run: agent-knowledge init"}
+        return {"target": ".claude/CLAUDE.md", "action": "skip", "detail": "not installed; run: agent-knowledge init"}
 
     template = template_path.read_text()
     current = target.read_text(errors="replace")
 
     if current.strip() == template.strip():
-        return {"target": "CLAUDE.md", "action": "up-to-date", "detail": "already matches template"}
+        return {"target": ".claude/CLAUDE.md", "action": "up-to-date", "detail": "already matches template"}
 
     # Check if the opening header matches — if not, it's been customized
     tmpl_lines = template.strip().splitlines()
@@ -207,13 +235,44 @@ def _refresh_claude_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
 
     if not header_match:
         return {
-            "target": "CLAUDE.md",
+            "target": ".claude/CLAUDE.md",
             "action": "warn",
             "detail": "differs from template and appears customized — review manually or re-run with --force",
         }
 
     action = _write(target, template, dry_run=dry_run)
-    return {"target": "CLAUDE.md", "action": action, "detail": "refreshed from bundled template"}
+    return {"target": ".claude/CLAUDE.md", "action": action, "detail": "refreshed from bundled template"}
+
+
+def _refresh_claude_commands(repo_root: Path, *, dry_run: bool) -> list[dict[str, Any]]:
+    """Refresh .claude/commands/ from the bundled templates."""
+    commands_dir = repo_root / ".claude" / "commands"
+    template_dir = get_assets_dir() / "templates" / "integrations" / "claude" / "commands"
+    results: list[dict[str, Any]] = []
+
+    if not template_dir.is_dir():
+        return [{"target": ".claude/commands/", "action": "skip", "detail": "no bundled command templates"}]
+
+    for template_file in sorted(template_dir.glob("*.md")):
+        rel = f".claude/commands/{template_file.name}"
+        target = commands_dir / template_file.name
+
+        if not target.exists():
+            action = _write(target, template_file.read_text(), dry_run=dry_run)
+            results.append({"target": rel, "action": action, "detail": "created from bundled template"})
+            continue
+
+        template_content = template_file.read_text()
+        current_content = target.read_text(errors="replace")
+
+        if current_content.strip() == template_content.strip():
+            results.append({"target": rel, "action": "up-to-date", "detail": "command is current"})
+            continue
+
+        action = _write(target, template_content, dry_run=dry_run)
+        results.append({"target": rel, "action": action, "detail": "refreshed from bundled template"})
+
+    return results
 
 
 def _refresh_cursor_commands(repo_root: Path, *, dry_run: bool) -> list[dict[str, Any]]:
@@ -414,6 +473,70 @@ def check_cursor_integration(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def check_claude_integration(repo_root: Path) -> dict[str, Any]:
+    """Check Claude integration completeness.
+
+    Returns a dict with 'healthy' bool, 'issues' list, and 'info' detail dict.
+    """
+    from agent_knowledge.runtime.integrations import (
+        CLAUDE_EXPECTED_COMMANDS,
+        CLAUDE_EXPECTED_HOOK_EVENTS,
+    )
+
+    issues: list[str] = []
+    info: dict[str, Any] = {}
+
+    # CLAUDE.md (runtime contract)
+    claude_md = repo_root / ".claude" / "CLAUDE.md"
+    info["claude_md_installed"] = claude_md.is_file()
+    if not claude_md.is_file():
+        issues.append("Missing .claude/CLAUDE.md -- run: agent-knowledge refresh-system")
+
+    # Settings (hooks)
+    settings_file = repo_root / ".claude" / "settings.json"
+    info["settings_installed"] = settings_file.is_file()
+    if settings_file.is_file():
+        try:
+            settings_data = json.loads(settings_file.read_text())
+            hooks_section = settings_data.get("hooks", {})
+            events = set(hooks_section.keys())
+            missing_events = CLAUDE_EXPECTED_HOOK_EVENTS - events
+            info["hook_events"] = sorted(events)
+            info["missing_hook_events"] = sorted(missing_events)
+            if missing_events:
+                issues.append(
+                    f"Settings missing hook events: {', '.join(sorted(missing_events))} "
+                    f"-- run: agent-knowledge refresh-system"
+                )
+        except (json.JSONDecodeError, ValueError):
+            issues.append("Invalid .claude/settings.json -- run: agent-knowledge refresh-system")
+            info["hook_events"] = []
+            info["missing_hook_events"] = sorted(CLAUDE_EXPECTED_HOOK_EVENTS)
+    else:
+        issues.append("Missing .claude/settings.json -- run: agent-knowledge init")
+        info["hook_events"] = []
+        info["missing_hook_events"] = sorted(CLAUDE_EXPECTED_HOOK_EVENTS)
+
+    # Commands
+    commands_dir = repo_root / ".claude" / "commands"
+    installed_commands = [f for f in CLAUDE_EXPECTED_COMMANDS if (commands_dir / f).is_file()]
+    missing_commands = [f for f in sorted(CLAUDE_EXPECTED_COMMANDS) if f not in installed_commands]
+    info["commands_installed"] = sorted(installed_commands)
+    info["commands_missing"] = missing_commands
+    if missing_commands:
+        issues.append(
+            f"Missing Claude commands: {', '.join(missing_commands)} "
+            f"-- run: agent-knowledge refresh-system"
+        )
+
+    return {
+        "integration": "claude",
+        "info": info,
+        "issues": issues,
+        "healthy": len(issues) == 0,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Main entry point                                                             #
 # --------------------------------------------------------------------------- #
@@ -461,12 +584,17 @@ def run_refresh(
     for r in _refresh_cursor_commands(repo_root, dry_run=dry_run):
         changes.append(r)
 
-    # Claude integration (if detected)
-    if detected.get("claude"):
-        r = _refresh_claude_md(repo_root, dry_run=dry_run)
+    # Claude integration (always installed)
+    r = _refresh_claude_settings(repo_root, dry_run=dry_run)
+    changes.append(r)
+
+    r = _refresh_claude_md(repo_root, dry_run=dry_run)
+    changes.append(r)
+    if r["action"] == "warn":
+        warnings.append(f".claude/CLAUDE.md: {r['detail']}")
+
+    for r in _refresh_claude_commands(repo_root, dry_run=dry_run):
         changes.append(r)
-        if r["action"] == "warn":
-            warnings.append(f"CLAUDE.md: {r['detail']}")
 
     # Codex integration (if detected)
     if detected.get("codex"):

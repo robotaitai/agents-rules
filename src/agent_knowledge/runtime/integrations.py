@@ -13,6 +13,12 @@ CURSOR_EXPECTED_HOOK_EVENTS = {"session-start", "post-write", "stop", "preCompac
 # Expected Cursor command files.
 CURSOR_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}
 
+# Expected Claude hook events — used by integration health checks.
+CLAUDE_EXPECTED_HOOK_EVENTS = {"SessionStart", "Stop", "PreCompact"}
+
+# Expected Claude command files.
+CLAUDE_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}
+
 TOOLS = ("cursor", "claude", "codex")
 
 
@@ -123,20 +129,51 @@ def install_cursor(repo: Path, *, dry_run: bool = False, force: bool = False) ->
 
 
 def install_claude(repo: Path, *, dry_run: bool = False, force: bool = False) -> list[str]:
-    """Install Claude CLAUDE.md integration."""
+    """Install Claude project-local integration (settings, commands, instructions)."""
     assets = get_assets_dir()
     actions = []
+    repo_abs = str(repo.resolve())
 
-    src = assets / "templates" / "integrations" / "claude" / "CLAUDE.md"
-    dst = repo / "CLAUDE.md"
-
-    if dst.exists() and not force:
-        actions.append(f"  exists: CLAUDE.md")
+    # Settings (hooks)
+    settings_src = assets / "templates" / "integrations" / "claude" / "settings.json"
+    settings_dst = repo / ".claude" / "settings.json"
+    if settings_dst.exists() and not force:
+        actions.append("  exists: .claude/settings.json")
     elif dry_run:
-        actions.append(f"  [dry-run] would create: CLAUDE.md")
+        actions.append("  [dry-run] would create: .claude/settings.json")
     else:
-        shutil.copy2(src, dst)
-        actions.append(f"  created: CLAUDE.md")
+        settings_dst.parent.mkdir(parents=True, exist_ok=True)
+        content = settings_src.read_text().replace("<repo-path>", repo_abs)
+        settings_dst.write_text(content)
+        actions.append("  created: .claude/settings.json")
+
+    # Commands
+    commands_template_dir = assets / "templates" / "integrations" / "claude" / "commands"
+    if commands_template_dir.is_dir():
+        commands_dst_dir = repo / ".claude" / "commands"
+        for cmd_src in sorted(commands_template_dir.glob("*.md")):
+            cmd_dst = commands_dst_dir / cmd_src.name
+            rel = f".claude/commands/{cmd_src.name}"
+            if cmd_dst.exists() and not force:
+                actions.append(f"  exists: {rel}")
+            elif dry_run:
+                actions.append(f"  [dry-run] would create: {rel}")
+            else:
+                commands_dst_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(cmd_src, cmd_dst)
+                actions.append(f"  created: {rel}")
+
+    # Project-local CLAUDE.md (runtime contract)
+    claude_md_src = assets / "templates" / "integrations" / "claude" / "CLAUDE.md"
+    claude_md_dst = repo / ".claude" / "CLAUDE.md"
+    if claude_md_dst.exists() and not force:
+        actions.append("  exists: .claude/CLAUDE.md")
+    elif dry_run:
+        actions.append("  [dry-run] would create: .claude/CLAUDE.md")
+    else:
+        claude_md_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(claude_md_src, claude_md_dst)
+        actions.append("  created: .claude/CLAUDE.md")
 
     return actions
 
@@ -177,21 +214,23 @@ def install_all(
 ) -> dict[str, list[str]]:
     """Install bridge files for detected integrations.
 
-    Cursor is always installed (hooks + rule) because it is the primary agent
-    IDE and the hooks/rules have no effect when Cursor is not in use.
+    Cursor and Claude are always installed because their project-local
+    integration files (hooks, rules, settings, commands) are inert when
+    the respective tool is not in use.
 
-    Claude and Codex bridges are only installed when their marker directories
-    (.claude/ or .codex/) are detected, to avoid polluting repos that don't
-    use those tools.
+    Codex bridges are only installed when the .codex/ marker directory
+    is detected, to avoid polluting repos that don't use it.
     """
     results: dict[str, list[str]] = {}
 
     # Cursor: always install -- hooks/rules are inert outside Cursor
     results["cursor"] = _INSTALLERS["cursor"](repo, dry_run=dry_run, force=force)
 
-    # Claude / Codex: install only when detected
-    for tool in ("claude", "codex"):
-        if detected.get(tool, False):
-            results[tool] = _INSTALLERS[tool](repo, dry_run=dry_run, force=force)
+    # Claude: always install -- settings/commands are inert outside Claude
+    results["claude"] = _INSTALLERS["claude"](repo, dry_run=dry_run, force=force)
+
+    # Codex: install only when detected
+    if detected.get("codex", False):
+        results["codex"] = _INSTALLERS["codex"](repo, dry_run=dry_run, force=force)
 
     return results

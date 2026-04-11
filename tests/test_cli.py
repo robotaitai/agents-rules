@@ -126,14 +126,17 @@ def test_init_installs_cursor_hooks(tmp_path: Path):
     assert (repo / ".cursor" / "hooks.json").is_file()
 
 
-def test_init_installs_claude_bridge_when_detected(tmp_path: Path):
+def test_init_installs_claude_integration(tmp_path: Path):
+    """Claude integration is always installed (like Cursor)."""
     repo = _init_repo(tmp_path, "claude-test")
-    (repo / ".claude").mkdir()
     kh = tmp_path / "kh"
     r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
     assert r.returncode == 0, f"init failed: {r.stderr}"
-    assert (repo / "CLAUDE.md").is_file()
-    content = (repo / "CLAUDE.md").read_text()
+    assert (repo / ".claude" / "settings.json").is_file()
+    assert (repo / ".claude" / "CLAUDE.md").is_file()
+    assert (repo / ".claude" / "commands" / "memory-update.md").is_file()
+    assert (repo / ".claude" / "commands" / "system-update.md").is_file()
+    content = (repo / ".claude" / "CLAUDE.md").read_text()
     assert "agent-knowledge" in content.lower()
 
 
@@ -148,13 +151,13 @@ def test_init_installs_codex_bridge_when_detected(tmp_path: Path):
 
 def test_init_multi_tool_detection(tmp_path: Path):
     repo = _init_repo(tmp_path, "multi-tool")
-    (repo / ".claude").mkdir()
     (repo / ".codex").mkdir()
     kh = tmp_path / "kh"
     r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
     assert r.returncode == 0, f"init failed: {r.stderr}"
     assert (repo / ".cursor" / "hooks.json").is_file()
-    assert (repo / "CLAUDE.md").is_file()
+    assert (repo / ".claude" / "settings.json").is_file()
+    assert (repo / ".claude" / "CLAUDE.md").is_file()
     assert (repo / ".codex" / "AGENTS.md").is_file()
 
 
@@ -1693,3 +1696,262 @@ def test_check_cursor_integration_importable():
     from agent_knowledge.runtime.refresh import check_cursor_integration
 
     assert callable(check_cursor_integration)
+
+
+# -- Claude integration tests ---------------------------------------------- #
+
+
+def test_init_installs_claude_settings(tmp_path: Path):
+    """init must create .claude/settings.json with lifecycle hooks."""
+    repo = _init_repo(tmp_path, "claude-settings")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0, f"init failed: {r.stderr}"
+
+    settings = repo / ".claude" / "settings.json"
+    assert settings.is_file(), ".claude/settings.json must be created"
+
+    data = json.loads(settings.read_text())
+    assert "hooks" in data
+    hooks = data["hooks"]
+    assert "SessionStart" in hooks
+    assert "Stop" in hooks
+    assert "PreCompact" in hooks
+
+
+def test_claude_settings_hooks_reference_installed_cli(tmp_path: Path):
+    """Hook commands in .claude/settings.json must use installed CLI, not repo-relative paths."""
+    repo = _init_repo(tmp_path, "claude-cli-ref")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    settings = repo / ".claude" / "settings.json"
+    content = settings.read_text()
+    assert "agent-knowledge" in content
+    # Must not contain repo-relative script paths
+    assert "scripts/" not in content
+    assert "bash " not in content
+
+
+def test_claude_settings_hooks_contain_repo_path(tmp_path: Path):
+    """Hook commands must include the --project <repo-path> for the specific repo."""
+    repo = _init_repo(tmp_path, "claude-repo-path")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    data = json.loads((repo / ".claude" / "settings.json").read_text())
+    repo_abs = str(repo.resolve())
+    for event, hook_list in data["hooks"].items():
+        for entry in hook_list:
+            for hook in entry.get("hooks", []):
+                cmd = hook.get("command", "")
+                assert repo_abs in cmd, f"Hook for {event} must contain repo path"
+
+
+def test_init_installs_claude_commands(tmp_path: Path):
+    """init must create .claude/commands/ with memory-update.md and system-update.md."""
+    repo = _init_repo(tmp_path, "claude-cmds")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    for cmd in ("memory-update.md", "system-update.md"):
+        path = repo / ".claude" / "commands" / cmd
+        assert path.is_file(), f".claude/commands/{cmd} must be created"
+        content = path.read_text()
+        assert "agent-knowledge" in content, f"{cmd} must reference agent-knowledge CLI"
+
+
+def test_init_installs_claude_md(tmp_path: Path):
+    """init must create .claude/CLAUDE.md with the runtime contract."""
+    repo = _init_repo(tmp_path, "claude-md")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    claude_md = repo / ".claude" / "CLAUDE.md"
+    assert claude_md.is_file(), ".claude/CLAUDE.md must be created"
+    content = claude_md.read_text()
+    assert "agent-knowledge" in content
+    assert "Memory/" in content
+    assert "Evidence/" in content
+    assert "STATUS.md" in content
+    assert "onboarding" in content.lower()
+
+
+def test_claude_integration_idempotent(tmp_path: Path):
+    """Running init twice must not duplicate or corrupt Claude integration files."""
+    repo = _init_repo(tmp_path, "claude-idem")
+    kh = tmp_path / "kh"
+    r1 = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r1.returncode == 0
+
+    settings_before = (repo / ".claude" / "settings.json").read_text()
+    claude_md_before = (repo / ".claude" / "CLAUDE.md").read_text()
+
+    r2 = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r2.returncode == 0
+
+    settings_after = (repo / ".claude" / "settings.json").read_text()
+    claude_md_after = (repo / ".claude" / "CLAUDE.md").read_text()
+
+    assert settings_before == settings_after, "settings.json must be stable across reruns"
+    assert claude_md_before == claude_md_after, "CLAUDE.md must be stable across reruns"
+
+
+def test_check_claude_integration_importable():
+    """check_claude_integration must be importable from refresh module."""
+    from agent_knowledge.runtime.refresh import check_claude_integration
+
+    assert callable(check_claude_integration)
+
+
+def test_check_claude_integration_healthy(tmp_path: Path):
+    """check_claude_integration must report healthy after init."""
+    from agent_knowledge.runtime.refresh import check_claude_integration
+
+    repo = _init_repo(tmp_path, "claude-health")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    result = check_claude_integration(repo)
+    assert result["integration"] == "claude"
+    assert result["healthy"] is True, f"Expected healthy but got issues: {result['issues']}"
+    assert result["issues"] == []
+    assert result["info"]["settings_installed"] is True
+    assert result["info"]["claude_md_installed"] is True
+    assert "memory-update.md" in result["info"]["commands_installed"]
+    assert "system-update.md" in result["info"]["commands_installed"]
+
+
+def test_check_claude_integration_unhealthy_missing(tmp_path: Path):
+    """check_claude_integration must report issues when files are missing."""
+    from agent_knowledge.runtime.refresh import check_claude_integration
+
+    repo = _init_repo(tmp_path, "claude-missing")
+    result = check_claude_integration(repo)
+    assert result["healthy"] is False
+    assert len(result["issues"]) > 0
+
+
+def test_refresh_system_updates_claude(tmp_path: Path):
+    """refresh-system must update Claude integration files."""
+    repo = _init_repo(tmp_path, "claude-refresh")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("refresh-system", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    targets = [c["target"] for c in data["changes"]]
+    assert ".claude/settings.json" in targets
+    assert ".claude/CLAUDE.md" in targets
+
+
+def test_refresh_system_claude_idempotent(tmp_path: Path):
+    """refresh-system run twice must report up-to-date on second run."""
+    repo = _init_repo(tmp_path, "claude-refresh-idem")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("refresh-system", "--project", str(repo))
+
+    r = _run("refresh-system", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    claude_changes = [c for c in data["changes"] if c["target"].startswith(".claude/")]
+    for c in claude_changes:
+        assert c["action"] == "up-to-date", f"{c['target']} should be up-to-date, got {c['action']}"
+
+
+def test_doctor_reports_claude_health(tmp_path: Path):
+    """doctor must check Claude integration and report issues."""
+    repo = _init_repo(tmp_path, "claude-doctor")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("doctor", "--project", str(repo))
+    assert r.returncode == 0
+
+
+def test_doctor_warns_missing_claude(tmp_path: Path):
+    """doctor must warn when Claude integration files are missing."""
+    repo = _init_repo(tmp_path, "claude-doctor-warn")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    # Remove Claude settings to trigger warning
+    import os
+    os.remove(str(repo / ".claude" / "settings.json"))
+
+    r = _run("doctor", "--project", str(repo))
+    assert "settings.json" in r.stderr or r.returncode == 0
+
+
+def test_bundled_claude_templates_exist():
+    """Claude integration templates must be bundled in the package assets."""
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    assets = get_assets_dir()
+
+    settings = assets / "templates" / "integrations" / "claude" / "settings.json"
+    assert settings.is_file(), "Bundled Claude settings.json missing"
+    data = json.loads(settings.read_text())
+    assert "hooks" in data
+
+    claude_md = assets / "templates" / "integrations" / "claude" / "CLAUDE.md"
+    assert claude_md.is_file(), "Bundled Claude CLAUDE.md missing"
+
+    for cmd in ("memory-update.md", "system-update.md"):
+        path = assets / "templates" / "integrations" / "claude" / "commands" / cmd
+        assert path.is_file(), f"Bundled Claude command missing: {path}"
+        content = path.read_text()
+        assert "agent-knowledge" in content
+
+
+def test_claude_expected_hook_events():
+    """CLAUDE_EXPECTED_HOOK_EVENTS must match the settings.json template."""
+    from agent_knowledge.runtime.integrations import CLAUDE_EXPECTED_HOOK_EVENTS
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    settings = get_assets_dir() / "templates" / "integrations" / "claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    template_events = set(data["hooks"].keys())
+    assert template_events == CLAUDE_EXPECTED_HOOK_EVENTS
+
+
+def test_smoke_init_doctor_with_claude(tmp_path: Path):
+    """End-to-end: init, doctor, update, verify Claude integration."""
+    repo = _init_repo(tmp_path, "e2e-claude")
+    kh = tmp_path / "kh"
+
+    # init
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0, f"init failed: {r.stderr}"
+
+    # Verify all Claude files
+    assert (repo / ".claude" / "settings.json").is_file()
+    assert (repo / ".claude" / "CLAUDE.md").is_file()
+    assert (repo / ".claude" / "commands" / "memory-update.md").is_file()
+    assert (repo / ".claude" / "commands" / "system-update.md").is_file()
+
+    # doctor
+    r = _run("doctor", "--project", str(repo), "--json")
+    stdout = r.stdout.strip()
+    if stdout:
+        parsed = json.loads(stdout)
+        assert "integrations" in parsed
+        assert "claude" in parsed["integrations"]
+
+    # update (sync)
+    r = _run("sync", "--project", str(repo))
+    assert r.returncode == 0
+
+    # refresh-system (may be "refreshed" on first run if init didn't stamp version)
+    r = _run("refresh-system", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["action"] in ("up-to-date", "refreshed")
+
+    # second refresh-system must be up-to-date
+    r = _run("refresh-system", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["action"] == "up-to-date"

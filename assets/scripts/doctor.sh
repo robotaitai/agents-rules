@@ -87,7 +87,7 @@ fi
 # Detect integrations
 INTEGRATIONS=()
 [ -d "$TARGET_PROJECT/.cursor" ] && INTEGRATIONS+=("cursor")
-[ -d "$TARGET_PROJECT/.claude" ] || [ -f "$TARGET_PROJECT/CLAUDE.md" ] && INTEGRATIONS+=("claude")
+{ [ -f "$TARGET_PROJECT/.claude/settings.json" ] || [ -f "$TARGET_PROJECT/.claude/CLAUDE.md" ] || [ -d "$TARGET_PROJECT/.claude" ]; } && INTEGRATIONS+=("claude")
 [ -d "$TARGET_PROJECT/.codex" ] && INTEGRATIONS+=("codex")
 
 # Read onboarding state
