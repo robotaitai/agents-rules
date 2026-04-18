@@ -340,17 +340,12 @@ def _append_history_event(
     if not events_path.is_file():
         return
     event = {
-        "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "event_type": "absorb",
-        "source_tool": "cli",
-        "project_slug": project_slug,
+        "ts": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "type": "absorb",
+        "tool": "cli",
+        "slug": project_slug,
         "summary": f"Absorbed {imported} docs, {decisions_parsed} decisions from project files",
         "touched_paths": touched_paths[:20],
-        "touched_branches": [],
-        "related_notes": [],
-        "related_decisions": [],
-        "related_commits": [],
-        "confidence": "high",
     }
     events_path.parent.mkdir(parents=True, exist_ok=True)
     with open(events_path, "a") as f:
