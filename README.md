@@ -149,10 +149,17 @@ missing, `doctor` tells you exactly what to run.
 | `view` | Build site and open in browser |
 | `clean-import <url>` | Import a URL as cleaned, non-canonical evidence |
 | `refresh-system` | Refresh all integration files to the current framework version |
+| `absorb` | Scan project docs/ADRs and ingest them into the vault |
 | `backfill-history` | Rebuild lightweight project history from git |
 | `compact` | Prune stale captures and old session state |
 
 All write commands support `--dry-run` and `--json`. Run `agent-knowledge --help` for the full list.
+
+After upgrading `agent-knowledge-cli`, run this inside each project to pull in the latest hooks, rules, and commands:
+
+```bash
+agent-knowledge refresh-system --project .
+```
 
 
 

@@ -116,9 +116,17 @@ def _md_to_html(text: str) -> str:
         s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
         # Links
         s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', s)
-        # Wiki-links (strip them gracefully)
-        s = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", s)
-        s = re.sub(r"\[\[([^\]]+)\]\]", r"\1", s)
+        # Wiki-links → internal site links resolved at runtime by JS
+        s = re.sub(
+            r"\[\[([^\]|#]+)(?:#[^\]|]*)?\|([^\]]+)\]\]",
+            lambda m: f'<a class="wikilink" data-target="{html_mod.escape(m.group(1).strip())}">{html_mod.escape(m.group(2).strip())}</a>',
+            s,
+        )
+        s = re.sub(
+            r"\[\[([^\]|#]+)(?:#[^\]]+)?\]\]",
+            lambda m: f'<a class="wikilink" data-target="{html_mod.escape(m.group(1).strip())}">{html_mod.escape(m.group(1).strip())}</a>',
+            s,
+        )
         return s
 
     for line in lines:
@@ -740,6 +748,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .note-body pre code{background:none;border:none;padding:0;font-size:12.5px}
 .note-body blockquote{border-left:3px solid var(--accent);padding:2px 0 2px 14px;color:var(--muted);margin:10px 0}
 .note-body a{color:var(--accent)}
+.note-body a.wikilink{color:var(--accent);text-decoration:none;border-bottom:1px dashed var(--accent);cursor:pointer}
+.note-body a.wikilink:hover{border-bottom-style:solid}
+.note-body a.wikilink-missing{color:var(--muted);border-bottom:1px dashed var(--muted);cursor:default}
 .note-body hr{border:none;border-top:1px solid var(--border);margin:18px 0}
 .note-body table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
 .note-body th{background:var(--surface-2);padding:6px 12px;text-align:left;border:1px solid var(--border);font-weight:600;color:var(--text-2)}
@@ -1100,6 +1111,36 @@ function findNote(path){
   return null;
 }
 
+function _allNotes(){
+  const all=[];
+  for(const b of DATA.branches){ all.push(b); for(const lf of (b.leaves||[])) all.push(lf); }
+  for(const d of (DATA.decisions||[])) all.push(d);
+  for(const e of (DATA.evidence||[])) all.push(e);
+  return all;
+}
+
+function findNoteBySlug(target){
+  const slug=target.toLowerCase().trim();
+  return _allNotes().find(n=>{
+    const stem=(n.path||'').split('/').pop().replace(/\\.md$/i,'').toLowerCase();
+    return stem===slug || (n.title||'').toLowerCase()===slug;
+  })||null;
+}
+
+function resolveWikilinks(container){
+  container.querySelectorAll('a.wikilink').forEach(el=>{
+    const target=el.dataset.target||'';
+    const note=findNoteBySlug(target);
+    if(note){
+      el.href='#note/'+encP(note.path);
+      el.onclick=(e)=>{e.preventDefault();nav('note',note.path);};
+    } else {
+      el.classList.add('wikilink-missing');
+      el.title='Note not found: '+target;
+    }
+  });
+}
+
 function showNote(path){
   _hideGraph();
   _view='note'; _notePath=path;
@@ -1148,6 +1189,7 @@ function showNote(path){
 
   h += `</div>`;
   content.innerHTML = h;
+  resolveWikilinks(content);
   setTopbar('note', note);
   setSidebarActive(path);
   document.getElementById('content').scrollTop=0;
