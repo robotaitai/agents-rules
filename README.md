@@ -86,6 +86,7 @@ branch-note convention, internal links. But everything works without it too.
 | `CLAUDE.md` | Runtime contract: knowledge layers, session protocol, onboarding |
 | `commands/memory-update.md` | `/memory-update` slash command |
 | `commands/system-update.md` | `/system-update` slash command |
+| `commands/absorb.md` | `/absorb <file/folder>` slash command |
 
 **Cursor** (`.cursor/`):
 
@@ -95,6 +96,7 @@ branch-note convention, internal links. But everything works without it too.
 | `hooks.json` | Lifecycle hooks: sync on start, update on write, sync on stop/compact |
 | `commands/memory-update.md` | `/memory-update` slash command |
 | `commands/system-update.md` | `/system-update` slash command |
+| `commands/absorb.md` | `/absorb <file/folder>` slash command |
 
 **Codex** (`.codex/`) -- installed when detected:
 
