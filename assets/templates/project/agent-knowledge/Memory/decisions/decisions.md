@@ -1,5 +1,5 @@
 ---
-note_type: decision-log
+note_type: decisions-index
 project: <project-name>
 status: active
 last_updated: <date>

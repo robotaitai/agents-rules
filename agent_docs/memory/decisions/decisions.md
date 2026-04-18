@@ -1,6 +1,6 @@
 ---
-note_type: decision-log
-updated: 2026-04-13
+note_type: decisions-index
+updated: 2026-04-18
 tags:
   - agent-knowledge
   - memory
@@ -56,29 +56,29 @@ Architectural and process decisions for agent-knowledge.
 ## 007 - Project-local Cursor integration as primary runtime {#007}
 
 - **Date**: 2026-04-12
-- **Context**: Global home-directory hooks were fragile and not portable. Projects should carry their own contract.
-- **Decision**: `init` installs `.cursor/rules/`, `.cursor/hooks.json`, and `.cursor/commands/` into the repo. Project is self-sufficient without winning the global hook setup.
+- **Context**: Global home-dir hook setup was fragile; agents forgot memory layer between sessions
+- **Decision**: `init` installs `.cursor/rules/`, `.cursor/hooks.json`, `.cursor/commands/` per-project; project carries the contract
 - **Status**: Active
 
-## 008 - Full session lifecycle hooks (stop + preCompact) {#008}
+## 008 - Full session lifecycle hooks {#008}
 
 - **Date**: 2026-04-12
-- **Context**: session-start and post-write alone leave state gaps -- work done at end of task or before compaction was not synced.
-- **Decision**: Add `stop` and `preCompact` hooks alongside `session-start` and `post-write`. All four call the installed CLI; hooks stay thin.
+- **Context**: Only `post-write` and `session-start` hooks existed; stop and compaction events missed
+- **Decision**: Add `stop` + `preCompact` hooks both calling `agent-knowledge sync`; hooks stay thin
 - **Status**: Active
 
-## 009 - init auto-runs import (no manual steps) {#009}
+## 009 - init auto-runs import and shows single clean prompt {#009}
 
-- **Date**: 2026-04-12
-- **Context**: After init, users were shown a "Next steps" list including `agent-knowledge import`. That's noise the CLI can eliminate.
-- **Decision**: `init` auto-runs `import-agent-history.sh` internally. Scripts no longer print "Next steps". Final output is a single box: "Paste in your agent chat."
+- **Date**: 2026-04-13
+- **Context**: `init` output had multiple "Next steps" blocks confusing users
+- **Decision**: `init` auto-runs `import-agent-history.sh` and `backfill-history`; shows one agent-chat box at the end
 - **Status**: Active
 
 ## 010 - Claude Code as always-installed first-class integration {#010}
 
 - **Date**: 2026-04-13
-- **Context**: Claude Code was only installed when `.claude/` was already present. This created parity asymmetry with Cursor and meant new Claude users got no integration.
-- **Decision**: Claude is installed on every `init`, same as Cursor. Adds `.claude/settings.json` (hooks), `.claude/CLAUDE.md` (runtime contract), `.claude/commands/` (slash commands). Detection still used for Codex.
+- **Context**: Claude Code adoption growing; was previously optional/detected-only
+- **Decision**: `init` always installs `.claude/` integration (settings.json, CLAUDE.md, commands/); `refresh-system` keeps it current
 - **Status**: Active
 
 ## See Also

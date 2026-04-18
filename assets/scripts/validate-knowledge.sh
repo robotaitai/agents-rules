@@ -123,7 +123,7 @@ validate_durable_note() {
     fi
 
     case "$note_type" in
-        durable-memory-root|durable-memory-branch|memory-branch|tooling-memory|tooling-index|decision-log)
+        durable-memory-root|durable-memory-branch|memory-branch|tooling-memory|tooling-index)
             for heading in "## Purpose" "## Current State" "## Recent Changes" "## Decisions" "## Open Questions"; do
                 if ! grep -q "^$heading\$" "$file"; then
                     ERRORS+=("$rel is missing required section: $heading")

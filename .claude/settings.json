@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-knowledge sync --project /Users/taio/code/agent-knowledge && agent-knowledge refresh-system --project /Users/taio/code/agent-knowledge"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-knowledge sync --project /Users/taio/code/agent-knowledge"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-knowledge sync --project /Users/taio/code/agent-knowledge"
+          }
+        ]
+      }
+    ]
+  }
+}
