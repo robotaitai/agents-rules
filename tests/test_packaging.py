@@ -178,6 +178,7 @@ def test_bundled_skills_exist():
         "branch-note-convention",
         "obsidian-compatible-writing",
         "clean-web-import",
+        "absorb-repo",
     ]
     for skill in new_skills:
         path = assets / "skills" / skill / "SKILL.md"

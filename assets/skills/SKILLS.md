@@ -26,7 +26,8 @@ Install skills globally with:
 agent-knowledge setup
 ```
 
-This symlinks the bundled skills into `~/.cursor/skills/` and `~/.cursor/skills-cursor/`.
+This symlinks the bundled skills into `~/.cursor/skills/`, `~/.claude/skills/`,
+and `~/.cursor/skills-cursor/` (Cursor-specific meta-skills).
 
 ---
 
@@ -49,6 +50,7 @@ This symlinks the bundled skills into `~/.cursor/skills/` and `~/.cursor/skills-
 |-------|-------------|
 | `clean-web-import` | Import web content cleanly into Evidence/imports/ |
 | `history-backfill` | Backfill memory from existing repo history |
+| `absorb-repo` | Walk a repo, filter vendor/build noise, and feed `/absorb` one batch per top-level dir |
 
 ### Session and maintenance
 
