@@ -952,6 +952,7 @@ def test_skills_exist_and_are_discoverable():
         "memory-compaction",
         "project-ontology-bootstrap",
         "history-backfill",
+        "absorb-repo",
     ]
     for skill in expected_skills:
         skill_path = skills_dir / skill / "SKILL.md"
@@ -992,6 +993,81 @@ def test_obsidian_skill_is_marked_optional():
     assert skill.is_file()
     content = skill.read_text().lower()
     assert "optional" in content, "obsidian-compatible-writing must say 'optional'"
+
+
+# -- setup integration tests ---------------------------------------------- #
+
+
+def test_setup_installs_skills_for_cursor_and_claude(tmp_path: Path):
+    """`agent-knowledge setup` must symlink bundled skills into both
+    ~/.cursor/skills/ and ~/.claude/skills/, and both must contain absorb-repo.
+
+    Uses a fake HOME so the test does not touch the real user config.
+    """
+    import os
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    env = os.environ.copy()
+    env["HOME"] = str(fake_home)
+
+    r = subprocess.run(
+        [*BIN, "setup"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    assert r.returncode == 0, f"setup failed: stdout={r.stdout!r} stderr={r.stderr!r}"
+
+    cursor_skills = fake_home / ".cursor" / "skills"
+    claude_skills = fake_home / ".claude" / "skills"
+
+    assert cursor_skills.is_dir(), "~/.cursor/skills/ must be created"
+    assert claude_skills.is_dir(), "~/.claude/skills/ must be created"
+
+    # absorb-repo must be installed in both locations
+    for root in (cursor_skills, claude_skills):
+        skill = root / "absorb-repo" / "SKILL.md"
+        assert skill.exists(), f"absorb-repo not installed at {skill}"
+        # Symlinked install: resolve and verify it points at the bundled source
+        assert "absorb-repo" in str(skill.resolve())
+
+    # And a representative subset of the other bundled skills is present too
+    for required in ("memory-management", "clean-web-import"):
+        assert (cursor_skills / required / "SKILL.md").exists()
+        assert (claude_skills / required / "SKILL.md").exists()
+
+
+def test_setup_dry_run_does_not_write(tmp_path: Path):
+    """`agent-knowledge setup --dry-run` must not create skill directories."""
+    import os
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    env = os.environ.copy()
+    env["HOME"] = str(fake_home)
+
+    r = subprocess.run(
+        [*BIN, "setup", "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    assert r.returncode == 0, r.stderr
+
+    # Dry-run output should mention both destinations for visibility
+    combined = r.stdout + r.stderr
+    assert ".cursor/skills/" in combined
+    assert ".claude/skills/" in combined
+
+    # But no actual symlinks should have been created
+    for skill_dir in (
+        fake_home / ".cursor" / "skills" / "absorb-repo",
+        fake_home / ".claude" / "skills" / "absorb-repo",
+    ):
+        assert not skill_dir.exists(), f"dry-run must not create {skill_dir}"
 
 
 # -- clean-import tests ---------------------------------------------------- #

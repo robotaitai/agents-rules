@@ -1046,14 +1046,17 @@ def setup(dry_run: bool) -> None:
         _link(src, rules_dst / src.name, src.name, dry_run)
     click.echo("", err=True)
 
-    # Skills
-    skills_dst = home / ".cursor" / "skills"
-    skills_dst.mkdir(parents=True, exist_ok=True)
-    click.echo("[skills -> ~/.cursor/skills/]", err=True)
-    for src in sorted((assets / "skills").iterdir()):
-        if src.is_dir():
-            _link(src, skills_dst / src.name, src.name, dry_run)
-    click.echo("", err=True)
+    # Skills — installed to both Cursor and Claude Code skill directories
+    for skills_dst_label, skills_dst in (
+        ("~/.cursor/skills/", home / ".cursor" / "skills"),
+        ("~/.claude/skills/", home / ".claude" / "skills"),
+    ):
+        skills_dst.mkdir(parents=True, exist_ok=True)
+        click.echo(f"[skills -> {skills_dst_label}]", err=True)
+        for src in sorted((assets / "skills").iterdir()):
+            if src.is_dir():
+                _link(src, skills_dst / src.name, src.name, dry_run)
+        click.echo("", err=True)
 
     # Cursor-specific skills
     skills_cursor_dst = home / ".cursor" / "skills-cursor"
