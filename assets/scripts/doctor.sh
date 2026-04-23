@@ -76,11 +76,15 @@ if [ -f "$TARGET_PROJECT/.cursor/hooks.json" ]; then
     WARNINGS+=("Repo-local hooks are installed; review them if sync behavior is surprising.")
 fi
 
-if [ ! -L "$KNOWLEDGE_POINTER_PATH" ]; then
+if [ "${VAULT_MODE:-external}" = "local" ]; then
+    if [ ! -d "$KNOWLEDGE_POINTER_PATH" ] || [ -L "$KNOWLEDGE_POINTER_PATH" ]; then
+        WARNINGS+=("vault_mode is 'local' but agent-knowledge/ is not a real directory in the repo.")
+    fi
+elif [ ! -L "$KNOWLEDGE_POINTER_PATH" ]; then
     if kc_is_windows_like; then
         WARNINGS+=("agent-knowledge is not reported as a symlink. If this is a junction, verify it still resolves to the external knowledge folder.")
     else
-        WARNINGS+=("agent-knowledge is not a symlink. Canonical external source-of-truth mode is not active.")
+        WARNINGS+=("agent-knowledge is not a symlink. Run 'agent-knowledge migrate-to-local' if you intended local mode, or re-run 'agent-knowledge init' to restore the external-vault symlink.")
     fi
 fi
 
@@ -122,6 +126,7 @@ kc_write_json_output "$json_summary"
 if [ "$JSON_MODE" -ne 1 ]; then
     kc_log "Doctor result: $doctor_result"
     kc_log "  project: $TARGET_PROJECT"
+    kc_log "  vault mode: ${VAULT_MODE:-external}"
     kc_log "  pointer: $KNOWLEDGE_POINTER_PATH"
     kc_log "  real knowledge path: $KNOWLEDGE_REAL_DIR"
     kc_log "  onboarding: $ONBOARDING_STATUS"

@@ -1,0 +1,23 @@
+{
+	"nodes":[
+		{"id":"n1","type":"file","file":"Memory/architecture.md","x":660,"y":0,"width":220,"height":90,"color":"2"},
+		{"id":"n2","type":"file","file":"Memory/cli.md","x":505,"y":424,"width":220,"height":90,"color":"2"},
+		{"id":"n3","type":"file","file":"Memory/conventions.md","x":114,"y":649,"width":220,"height":90,"color":"2"},
+		{"id":"n4","type":"file","file":"Memory/decisions/decisions.md","x":-700,"y":700,"width":220,"height":90,"color":"2"},
+		{"id":"n5","type":"file","file":"Memory/deployments.md","x":-329,"y":571,"width":220,"height":90,"color":"2"},
+		{"id":"n6","type":"file","file":"Memory/gotchas.md","x":-620,"y":225,"width":220,"height":90,"color":"2"},
+		{"id":"n7","type":"file","file":"Memory/integrations.md","x":-620,"y":-225,"width":220,"height":90,"color":"2"},
+		{"id":"n8","type":"file","file":"Memory/packaging.md","x":-330,"y":-571,"width":220,"height":90,"color":"2"},
+		{"id":"n11","type":"file","file":"Evidence/evidence.md","x":678,"y":678,"width":220,"height":90,"color":"6"},
+		{"id":"n12","type":"file","file":"Evidence/imports/imported-evidence.md","x":-107,"y":953,"width":220,"height":90,"color":"6"},
+		{"id":"n13","type":"file","file":"Evidence/raw/git-recent.md","x":-812,"y":510,"width":220,"height":90,"color":"6"},
+		{"id":"n14","type":"file","file":"Evidence/raw/raw-evidence.md","x":-906,"y":-317,"width":220,"height":90,"color":"6"},
+		{"id":"n15","type":"file","file":"Outputs/knowledge-index.md","x":-317,"y":-906,"width":220,"height":90,"color":"4"},
+		{"id":"n16","type":"file","file":"Outputs/outputs.md","x":510,"y":-812,"width":220,"height":90,"color":"4"},
+		{"id":"n17","type":"file","file":"Sessions/sessions.md","x":953,"y":-107,"width":220,"height":90,"color":"5"},
+		{"id":"n10","type":"file","file":"Memory/testing.md","x":510,"y":-481,"width":220,"height":90,"color":"2"},
+		{"id":"n0","type":"file","file":"Memory/MEMORY.md","x":4,"y":-45,"width":220,"height":90,"color":"2"},
+		{"id":"n9","type":"file","file":"Memory/stack.md","x":80,"y":-571,"width":220,"height":90,"color":"2"}
+	],
+	"edges":[]
+}

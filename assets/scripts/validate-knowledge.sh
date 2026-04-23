@@ -100,13 +100,18 @@ fi
 pointer_resolved="$(kc_pointer_resolved_path || true)"
 if [ -z "$pointer_resolved" ]; then
     ERRORS+=("Unable to resolve ./agent-knowledge as a local handle.")
+elif [ "${VAULT_MODE:-external}" = "local" ]; then
+    # In local mode agent-knowledge/ is a real directory inside the repo -- OK
+    if [ -L "$KNOWLEDGE_POINTER_PATH" ]; then
+        WARNINGS+=("vault_mode is 'local' but agent-knowledge is still a symlink. Run: agent-knowledge migrate-to-local")
+    fi
 elif [ "$pointer_resolved" != "$KNOWLEDGE_REAL_DIR" ]; then
     ERRORS+=("agent-knowledge resolves to $pointer_resolved but .agent-project.yaml expects $KNOWLEDGE_REAL_DIR")
 elif [ ! -L "$KNOWLEDGE_POINTER_PATH" ]; then
     if kc_is_windows_like; then
         WARNINGS+=("agent-knowledge is not reported as a symlink; if this is a junction, verify it still points to the external knowledge folder.")
     else
-        ERRORS+=("agent-knowledge must be a symlink to the external knowledge folder in canonical mode.")
+        ERRORS+=("agent-knowledge must be a symlink to the external knowledge folder in canonical mode. Run: agent-knowledge migrate-to-local to switch to local mode.")
     fi
 fi
 

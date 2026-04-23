@@ -22,11 +22,16 @@ HOOK_TEMPLATE="$AGENTS_RULES_DIR/templates/hooks/hooks.json.template"
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/install-project-links.sh --slug <slug> --repo <repo-path> [--knowledge-home <dir>] [--real-path <dir>] [--install-hooks] [--dry-run] [--json] [--summary-file <file>]
+  scripts/install-project-links.sh --slug <slug> --repo <repo-path> [--knowledge-home <dir>] [--real-path <dir>] [--local] [--install-hooks] [--dry-run] [--json] [--summary-file <file>]
+
+Modes:
+  default (--external): knowledge lives in ~/agent-os/projects/<slug>/,
+                        ./agent-knowledge is a symlink to that folder.
+  --local:              knowledge lives in ./agent-knowledge/ (in the repo,
+                        git-tracked), ~/agent-os/projects/<slug>/ is a symlink
+                        pointing back to the repo folder.
 
 Notes:
-  - The source of truth lives in the dedicated external knowledge folder.
-  - The project repo exposes ./agent-knowledge as a local pointer to that folder.
   - Existing valid setup is left alone unless --force is provided.
 EOF
 }
@@ -36,6 +41,7 @@ REPO_PATH=""
 KNOWLEDGE_HOME="$HOME/agent-os/projects"
 REAL_PATH_ARG=""
 INSTALL_HOOKS=0
+LOCAL_MODE=0
 POSITIONAL=()
 WARNINGS=()
 CHANGES=()
@@ -70,6 +76,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --install-hooks)
             INSTALL_HOOKS=1
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=1
             shift
             ;;
         *)
@@ -128,30 +138,65 @@ CURSOR_HOOKS_FILE="$CURSOR_DIR/hooks.json"
 
 kc_log "Connecting project: $TARGET_PROJECT"
 kc_log "  slug: $PROJECT_SLUG"
-kc_log "  real knowledge path: $KNOWLEDGE_REAL_DIR"
 
-symlink_caveat="$(kc_detect_symlink_caveat)"
-if [ -n "$symlink_caveat" ]; then
-    WARNINGS+=("$symlink_caveat")
-    kc_log "  caveat: $symlink_caveat"
+if [ "$LOCAL_MODE" -eq 1 ]; then
+    # ── Local mode: knowledge lives in the repo, agent-os symlink points back ──
+    KNOWLEDGE_REAL_DIR="$TARGET_PROJECT/agent-knowledge"
+    kc_log "  mode: local (knowledge in repo)"
+    kc_log "  real knowledge path: $KNOWLEDGE_REAL_DIR"
+
+    # Create ./agent-knowledge/ as a real directory
+    kc_ensure_dir "$KNOWLEDGE_REAL_DIR" "agent-knowledge/"
+    case "$KC_LAST_ACTION" in
+        created|would-create)
+            CHANGES+=("knowledge-dir")
+            ;;
+    esac
+
+    # Create the reversed symlink: ~/agent-os/projects/<slug>/ → ./agent-knowledge/
+    AGENT_OS_LINK="$KNOWLEDGE_HOME/$PROJECT_SLUG"
+    if [ "$DRY_RUN" -eq 0 ]; then
+        if [ ! -e "$AGENT_OS_LINK" ] && [ ! -L "$AGENT_OS_LINK" ]; then
+            mkdir -p "$(dirname "$AGENT_OS_LINK")"
+            ln -s "$KNOWLEDGE_REAL_DIR" "$AGENT_OS_LINK"
+            kc_log "  linked: $AGENT_OS_LINK -> $KNOWLEDGE_REAL_DIR"
+            CHANGES+=("agent-os-link")
+        elif [ -L "$AGENT_OS_LINK" ]; then
+            kc_log "  exists: $AGENT_OS_LINK (symlink left unchanged)"
+        fi
+    else
+        kc_log "  [dry-run] would link: $AGENT_OS_LINK -> $KNOWLEDGE_REAL_DIR"
+    fi
+else
+    # ── External mode (default): knowledge in agent-os, repo has symlink ──
+    kc_log "  real knowledge path: $KNOWLEDGE_REAL_DIR"
+
+    symlink_caveat="$(kc_detect_symlink_caveat)"
+    if [ -n "$symlink_caveat" ]; then
+        WARNINGS+=("$symlink_caveat")
+        kc_log "  caveat: $symlink_caveat"
+    fi
+
+    kc_ensure_dir "$KNOWLEDGE_REAL_DIR" "${KNOWLEDGE_REAL_DIR#$HOME/}"
+    case "$KC_LAST_ACTION" in
+        created|would-create)
+            CHANGES+=("knowledge-dir")
+            ;;
+    esac
+    if [ -d "$KNOWLEDGE_REAL_DIR" ]; then
+        KNOWLEDGE_REAL_DIR="$(cd "$KNOWLEDGE_REAL_DIR" 2>/dev/null && pwd -P)"
+    fi
+
+    kc_ensure_symlink "$KNOWLEDGE_REAL_DIR" "$KNOWLEDGE_POINTER_PATH" "agent-knowledge"
+    case "$KC_LAST_ACTION" in
+        created|updated|would-create|would-update)
+            CHANGES+=("pointer")
+            ;;
+    esac
 fi
 
-kc_ensure_dir "$KNOWLEDGE_REAL_DIR" "${KNOWLEDGE_REAL_DIR#$HOME/}"
-case "$KC_LAST_ACTION" in
-    created|would-create)
-        CHANGES+=("knowledge-dir")
-        ;;
-esac
-if [ -d "$KNOWLEDGE_REAL_DIR" ]; then
-    KNOWLEDGE_REAL_DIR="$(cd "$KNOWLEDGE_REAL_DIR" 2>/dev/null && pwd -P)"
-fi
-
-kc_ensure_symlink "$KNOWLEDGE_REAL_DIR" "$KNOWLEDGE_POINTER_PATH" "agent-knowledge"
-case "$KC_LAST_ACTION" in
-    created|updated|would-create|would-update)
-        CHANGES+=("pointer")
-        ;;
-esac
+VAULT_MODE_VALUE="external"
+[ "$LOCAL_MODE" -eq 1 ] && VAULT_MODE_VALUE="local"
 
 if [ ! -f "$AGENT_PROJECT_FILE" ] || [ "$FORCE" -eq 1 ]; then
     kc_replace_in_template \
@@ -160,7 +205,8 @@ if [ ! -f "$AGENT_PROJECT_FILE" ] || [ "$FORCE" -eq 1 ]; then
         ".agent-project.yaml" \
         "<project-name>" "$PROJECT_NAME" \
         "<project-slug>" "$PROJECT_SLUG" \
-        "<absolute-path-to-dedicated-knowledge-folder>" "$KNOWLEDGE_REAL_DIR"
+        "<absolute-path-to-dedicated-knowledge-folder>" "$KNOWLEDGE_REAL_DIR" \
+        "<vault-mode>" "$VAULT_MODE_VALUE"
     case "$KC_LAST_ACTION" in
         created|updated|would-create|would-update)
             CHANGES+=(".agent-project.yaml")

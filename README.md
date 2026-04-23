@@ -34,11 +34,32 @@ persistent memory automatically -- no manual prompting, no config, no setup.
 - bootstraps the memory tree and marks onboarding as `pending`
 - imports repo history into `Evidence/` and backfills lightweight history from git
 
+## Storage modes
+
+By default, knowledge lives **outside** the repo at `~/agent-os/projects/<slug>/` and
+`./agent-knowledge` is a symlink to it (external mode). To keep knowledge **inside** the
+repo and commit it to git, use `--local`:
+
+```bash
+agent-knowledge init --local
+```
+
+In local mode:
+- `./agent-knowledge/` is a real directory tracked by git
+- `~/agent-os/projects/<slug>/` is a symlink pointing back into the repo
+- Noisy subfolders (`Evidence/raw/`, `Sessions/`, `Outputs/site/`, ...) are added to `.gitignore` automatically
+- Curated knowledge (`Memory/`, `History/`, `Evidence/imports/`, `Dashboards/`) is committed normally
+
+To convert an existing project from external to local:
+
+```bash
+agent-knowledge migrate-to-local
+```
+
 ## How It Works
 
-Knowledge lives **outside** the repo at `~/agent-os/projects/<slug>/` so it persists
-across branches, tools, and clones. The symlink `./agent-knowledge` gives every tool
-a stable local handle.
+Knowledge lives in `./agent-knowledge/` (in-repo or external symlink depending on mode) so every
+tool always has a stable local handle, regardless of branch, clone, or agent.
 
 ### Knowledge layers
 
@@ -143,6 +164,8 @@ missing, `doctor` tells you exactly what to run.
 | Command | What it does |
 |---------|-------------|
 | `init` | Set up a project -- one command, no arguments needed |
+| `init --local` | Set up with knowledge **in the repo** (git-tracked); reversed symlink in `~/agent-os/` |
+| `migrate-to-local` | Convert an existing external-vault project to local (in-repo) knowledge |
 | `sync` | Full sync: memory, history, git evidence, index |
 | `doctor` | Validate setup, integration health, version staleness |
 | `ship` | Validate + sync + commit + push |
@@ -257,7 +280,8 @@ agent-knowledge doctor --json   # machine-readable health check
 ```
 
 Common issues:
-- `./agent-knowledge` missing: run `agent-knowledge init`
+- `./agent-knowledge` missing: run `agent-knowledge init` (or `agent-knowledge init --local` to keep knowledge in the repo)
+- Knowledge not in git: run `agent-knowledge migrate-to-local` to switch to local mode
 - Onboarding still pending: paste the init prompt into your agent
 - Claude not picking up memory: check `.claude/settings.json` exists -- run `agent-knowledge refresh-system`
 - Cursor hooks not firing: check `.cursor/hooks.json` exists -- run `agent-knowledge refresh-system`

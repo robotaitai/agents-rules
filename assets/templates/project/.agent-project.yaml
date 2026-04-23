@@ -10,6 +10,7 @@ project:
   profile_hint: unknown
 
 knowledge:
+  vault_mode: <vault-mode>
   pointer_path: ./agent-knowledge
   real_path: <absolute-path-to-dedicated-knowledge-folder>
   ignore_file: ./.agentknowledgeignore

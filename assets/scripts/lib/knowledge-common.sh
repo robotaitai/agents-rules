@@ -353,6 +353,7 @@ kc_load_project_context() {
     PROJECT_NAME="$(basename "$TARGET_PROJECT")"
     PROJECT_SLUG="$(kc_slugify "$PROJECT_NAME")"
     PROJECT_PROFILE="unknown"
+    VAULT_MODE="external"
     AGENT_PROJECT_FILE="$TARGET_PROJECT/.agent-project.yaml"
     POINTER_PATH="$TARGET_PROJECT/agent-knowledge"
     POINTER_DISPLAY="./agent-knowledge"
@@ -363,6 +364,7 @@ kc_load_project_context() {
         PROJECT_SLUG="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "slug" || printf '%s' "$PROJECT_SLUG")"
         PROJECT_PROFILE="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "profile_hint" || kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "profile" || printf 'unknown')"
         FRAMEWORK_REPO="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "repo" || true)"
+        VAULT_MODE="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "vault_mode" 2>/dev/null || printf 'external')"
         pointer_value="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "pointer_path" || true)"
         real_value="$(kc_yaml_leaf_value "$AGENT_PROJECT_FILE" "real_path" || true)"
         if [ -n "$pointer_value" ]; then

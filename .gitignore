@@ -12,10 +12,22 @@ build/
 .venv/
 .pytest_cache/
 
-# Local project knowledge (created by agent-knowledge init on this repo)
-/agent-knowledge
 /.agent-project.yaml
 /.agentknowledgeignore
 /AGENTS.md
 /CLAUDE.md
 /.cursor/hooks.json
+
+# agent-knowledge: noisy auto-generated content excluded from git
+# Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.
+agent-knowledge/Evidence/raw/
+agent-knowledge/Evidence/captures/
+agent-knowledge/Sessions/
+agent-knowledge/Outputs/site/
+agent-knowledge/Outputs/graph.json
+agent-knowledge/Outputs/knowledge-index.json
+agent-knowledge/Outputs/knowledge-index.md
+agent-knowledge/Outputs/absorb-manifest.md
+agent-knowledge/.obsidian/workspace
+agent-knowledge/.obsidian/workspace.json
+agent-knowledge/.obsidian/workspaces.json

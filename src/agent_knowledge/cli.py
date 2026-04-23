@@ -36,6 +36,41 @@ def main() -> None:
     """Adaptive, file-based project knowledge for AI coding agents."""
 
 
+# -- helpers --------------------------------------------------------------- #
+
+_LOCAL_GITIGNORE_BLOCK = """\
+# agent-knowledge: noisy auto-generated content excluded from git
+# Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.
+agent-knowledge/Evidence/raw/
+agent-knowledge/Evidence/captures/
+agent-knowledge/Sessions/
+agent-knowledge/Outputs/site/
+agent-knowledge/Outputs/graph.json
+agent-knowledge/Outputs/knowledge-index.json
+agent-knowledge/Outputs/knowledge-index.md
+agent-knowledge/Outputs/absorb-manifest.md
+agent-knowledge/.obsidian/workspace
+agent-knowledge/.obsidian/workspace.json
+agent-knowledge/.obsidian/workspaces.json
+"""
+
+_LOCAL_GITIGNORE_SENTINEL = "agent-knowledge/Evidence/raw/"
+
+
+def _patch_gitignore_for_local_knowledge(repo_path: Path, json_mode: bool) -> None:
+    """Append local-mode knowledge gitignore patterns if not already present."""
+    gitignore = repo_path / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if _LOCAL_GITIGNORE_SENTINEL in content:
+            return  # already patched
+        gitignore.write_text(content.rstrip("\n") + "\n\n" + _LOCAL_GITIGNORE_BLOCK)
+    else:
+        gitignore.write_text(_LOCAL_GITIGNORE_BLOCK)
+    if not json_mode:
+        click.echo("  .gitignore: added local knowledge patterns", err=True)
+
+
 # -- init ------------------------------------------------------------------ #
 
 
@@ -44,6 +79,7 @@ def main() -> None:
 @click.option("--repo", default=".", type=click.Path(exists=True), help="Project repo path (default: cwd).")
 @click.option("--knowledge-home", default=None, help="Knowledge root (default: $AGENT_KNOWLEDGE_HOME or ~/agent-os/projects).")
 @click.option("--real-path", default=None, help="Explicit external knowledge folder path.")
+@click.option("--local", "local_mode", is_flag=True, help="Store knowledge inside the repo (git-tracked). ~/agent-os symlink points back to the repo folder.")
 @click.option("--no-integrations", is_flag=True, help="Skip auto-detection and installation of tool integrations.")
 @click.option("--dry-run", is_flag=True, help="Preview changes without writing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
@@ -53,6 +89,7 @@ def init(
     repo: str,
     knowledge_home: str | None,
     real_path: str | None,
+    local_mode: bool,
     no_integrations: bool,
     dry_run: bool,
     json_mode: bool,
@@ -62,6 +99,15 @@ def init(
 
     When run with no arguments inside a repo, infers slug from the directory
     name, auto-detects tool integrations, and installs everything needed.
+
+    \b
+    Storage modes:
+      default   Knowledge lives in ~/agent-os/projects/<slug>/ (external vault).
+                ./agent-knowledge is a symlink to that folder.
+      --local   Knowledge lives in ./agent-knowledge/ inside the repo (git-tracked).
+                ~/agent-os/projects/<slug>/ is a symlink back to the repo folder.
+                Noisy subfolders (Evidence/raw, Sessions, captures) are added
+                to .gitignore automatically.
     """
     from agent_knowledge.runtime.integrations import detect, install_all
 
@@ -72,17 +118,23 @@ def init(
     if knowledge_home is None:
         knowledge_home = os.environ.get("AGENT_KNOWLEDGE_HOME")
 
-    # Core setup: symlink, .agent-project.yaml, AGENTS.md, bootstrap
+    # Core setup: knowledge folder, .agent-project.yaml, AGENTS.md, bootstrap
     args = ["--slug", slug, "--repo", str(repo_path)]
     if knowledge_home:
         args.extend(["--knowledge-home", knowledge_home])
     if real_path:
         args.extend(["--real-path", real_path])
+    if local_mode:
+        args.append("--local")
     args.append("--install-hooks")
     _add_common_flags(args, dry_run=dry_run, json_mode=json_mode, force=force)
     rc = run_bash_script("install-project-links.sh", args)
     if rc != 0:
         sys.exit(rc)
+
+    # In local mode, patch .gitignore to exclude noisy knowledge subfolders
+    if local_mode and not dry_run:
+        _patch_gitignore_for_local_knowledge(repo_path, json_mode)
 
     # Auto-detect and install tool integrations
     if not no_integrations:
@@ -1024,6 +1076,115 @@ def _link(src: Path, dst: Path, label: str, dry_run: bool) -> None:
         dst.unlink() if dst.is_file() or dst.is_symlink() else None
     dst.symlink_to(src)
     click.echo(f"  linked: {label}", err=True)
+
+
+@main.command(name="migrate-to-local")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root (default: cwd).")
+@click.option("--knowledge-home", default=None, help="agent-os home for reversed symlink (default: ~/agent-os/projects).")
+@click.option("--dry-run", is_flag=True, help="Preview changes without writing.")
+def migrate_to_local(project: str, knowledge_home: str | None, dry_run: bool) -> None:
+    """Convert an existing external-vault project to local (in-repo) knowledge storage.
+
+    \b
+    What this does:
+      1. Reads the current external vault path from ./agent-knowledge (symlink).
+      2. Copies all vault content into ./agent-knowledge/ (real directory).
+      3. Removes the old symlink and replaces it with the real directory.
+      4. Creates ~/agent-os/projects/<slug>/ as a symlink back to ./agent-knowledge/.
+      5. Updates .agent-project.yaml to set vault_mode: local.
+      6. Patches .gitignore with noisy-subfolder exclusions.
+    """
+    import re as _re
+    import shutil
+
+    repo_path = Path(project).resolve()
+    pointer = repo_path / "agent-knowledge"
+
+    if not pointer.exists() and not pointer.is_symlink():
+        click.echo("Error: ./agent-knowledge does not exist in this project.", err=True)
+        sys.exit(1)
+
+    if pointer.exists() and not pointer.is_symlink():
+        click.echo("Already in local mode (./agent-knowledge is a real directory).", err=True)
+        sys.exit(0)
+
+    external_vault = pointer.resolve()
+    click.echo(f"Current vault: {external_vault}", err=True)
+    click.echo(f"Target:        {pointer} (real directory)", err=True)
+
+    if dry_run:
+        click.echo("(dry-run) would copy vault content and swap pointer", err=True)
+        return
+
+    # Copy external vault content to a temp location, then swap
+    tmp = repo_path / ".agent-knowledge-migrating"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+
+    click.echo("Copying vault content...", err=True)
+    shutil.copytree(str(external_vault), str(tmp), symlinks=True)
+
+    # Remove the old symlink
+    pointer.unlink()
+
+    # Move tmp to final location
+    shutil.move(str(tmp), str(pointer))
+    click.echo(f"  created: {pointer}/", err=True)
+
+    # Create reversed symlink in agent-os
+    kh = Path(knowledge_home) if knowledge_home else Path.home() / "agent-os" / "projects"
+
+    # Read slug from .agent-project.yaml (simple regex, no pyyaml dep)
+    project_yaml = repo_path / ".agent-project.yaml"
+    slug = repo_path.name  # fallback
+    if project_yaml.exists():
+        try:
+            m = _re.search(r"^\s*slug:\s*(\S+)", project_yaml.read_text(), _re.MULTILINE)
+            if m:
+                slug = m.group(1)
+        except Exception:
+            pass
+
+    agent_os_link = kh / slug
+    if agent_os_link.exists() or agent_os_link.is_symlink():
+        if agent_os_link.is_symlink():
+            agent_os_link.unlink()
+            click.echo(f"  removed old: {agent_os_link}", err=True)
+        else:
+            click.echo(f"  warning: {agent_os_link} is a real directory, leaving it alone", err=True)
+            agent_os_link = None
+    if agent_os_link:
+        agent_os_link.parent.mkdir(parents=True, exist_ok=True)
+        agent_os_link.symlink_to(pointer)
+        click.echo(f"  linked: {agent_os_link} -> {pointer}", err=True)
+
+    # Update .agent-project.yaml
+    if project_yaml.exists():
+        try:
+            text = project_yaml.read_text()
+            if "vault_mode:" in text:
+                text = _re.sub(r"vault_mode:\s*\S+", "vault_mode: local", text)
+            else:
+                text = text.replace(
+                    "pointer_path:", "vault_mode: local\n  pointer_path:", 1
+                )
+            # Update real_path to in-repo path
+            text = _re.sub(
+                r"real_path:\s*\S+",
+                f"real_path: {pointer}",
+                text,
+            )
+            project_yaml.write_text(text)
+            click.echo("  updated: .agent-project.yaml (vault_mode: local)", err=True)
+        except Exception as e:
+            click.echo(f"  warning: could not update .agent-project.yaml: {e}", err=True)
+
+    # Patch .gitignore
+    _patch_gitignore_for_local_knowledge(repo_path, json_mode=False)
+
+    click.echo("", err=True)
+    click.echo("Migration complete. The knowledge folder is now part of the repo.", err=True)
+    click.echo("Commit agent-knowledge/ (excluding the patterns added to .gitignore).", err=True)
 
 
 @main.command()
