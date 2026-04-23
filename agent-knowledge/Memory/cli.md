@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: cli
-updated: 2026-04-11
+updated: 2026-04-23
 tags:
   - agent-knowledge
   - cli
@@ -15,11 +15,13 @@ Design and implementation of the `agent-knowledge` command-line interface.
 
 Built on [[stack|click >= 8.0]] with a `@click.group()` top-level.
 
-## Subcommands (21)
+## Subcommands (23)
 
 | Command | Description | Delegates to |
 |---------|-------------|-------------|
 | `init` | Zero-arg project setup + history backfill | `install-project-links.sh` + integrations + history.py |
+| `init --local` | Same but creates real `agent-knowledge/` dir in repo; `~/agent-os/` symlink reversed | `install-project-links.sh --local` |
+| `migrate-to-local` | Convert existing external-vault project: copy vault, swap pointer, patch .gitignore | pure Python |
 | `sync` | Memory sync, session rollup, git evidence, capture, index | `runtime/sync.py` |
 | `setup` | Global Cursor rules/skills install | pure Python |
 | `bootstrap` | Repair memory tree | `bootstrap-memory-tree.sh` |
@@ -44,8 +46,17 @@ Built on [[stack|click >= 8.0]] with a `@click.group()` top-level.
 ## init (zero-arg)
 
 - Infers slug from directory name, detects integrations automatically
+- `--local` flag: creates `./agent-knowledge/` as real directory; creates `~/agent-os/projects/<slug>/` as symlink back; patches `.gitignore` with noisy-subfolder exclusions
 - After setup: **auto-calls `run_backfill()`** from `history.py` if vault exists
 - Prints cyan-bordered prompt with next-step suggestion
+
+## migrate-to-local
+
+- Detects current external vault from symlink
+- `shutil.copytree` to temp dir → unlink symlink → move to real `./agent-knowledge/`
+- Creates reversed symlink at `~/agent-os/projects/<slug>/` (skips if already a real dir)
+- Updates `.agent-project.yaml` vault_mode + real_path via regex
+- Calls `_patch_gitignore_for_local_knowledge()` — sentinel-guarded, idempotent
 
 ## doctor
 

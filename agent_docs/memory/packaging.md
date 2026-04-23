@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: packaging
-updated: 2026-04-13
+updated: 2026-04-23
 tags:
   - agent-knowledge
   - memory
@@ -30,13 +30,9 @@ See [[architecture#Path Resolution]] for how the code finds these at runtime.
 
 ## Version
 
-Current: **0.2.5**. PyPI package name: `agent-knowledge-cli`. See [[deployments]].
+Current: **0.2.7** (tagged `v0.2.7`). PyPI package name: `agent-knowledge-cli`. See [[deployments]].
 
 Install: `pip install agent-knowledge-cli`. Command: `agent-knowledge`.
-
-PyPI credentials stored in `~/.pypirc` (mode 600). Upload: `python -m twine upload dist/agent_knowledge_cli-<ver>*`.
-
-**Gotcha**: editable install (`pip install -e .`) copies assets into `.venv/site-packages/` at install time. Script edits under `assets/scripts/` require re-running `pip install -e .` to propagate to the venv copy. See [[gotchas]].
 
 ## Dependencies
 

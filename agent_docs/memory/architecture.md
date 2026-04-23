@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: architecture
-updated: 2026-04-12
+updated: 2026-04-23
 tags:
   - agent-knowledge
   - memory
@@ -28,14 +28,22 @@ Core design: path resolution, runtime modules, project config, integrations, kno
 
 ## Knowledge Vault Model
 
-- External vault at `~/agent-os/projects/<slug>/` — source of truth
-- Inside each repo: `./agent-knowledge` is a symlink/pointer to the external vault
-- Vault structure:
-  - `Memory/` — curated, canonical, durable knowledge (MEMORY.md + branch files)
-  - `Evidence/` — non-canonical: raw imports, captures, backfills
-  - `Outputs/` — generated helper artifacts (site, index, canvas) — never canonical
-  - `Sessions/` — temporary working state, rolled up by sync
-  - `History/` — lightweight diary: events.ndjson, history.md, timeline/
+Two storage modes controlled by `vault_mode` in `.agent-project.yaml`:
+
+| Mode | `./agent-knowledge` | `~/agent-os/projects/<slug>/` |
+|------|--------------------|-----------------------------|
+| `external` (default) | symlink → external vault | real directory (source of truth) |
+| `local` | real directory in repo (git-tracked) | symlink → `./agent-knowledge` |
+
+Use `agent-knowledge init --local` for local mode, or `agent-knowledge migrate-to-local` to convert.
+In local mode, `.gitignore` auto-patched to exclude `Evidence/raw/`, `Sessions/`, `Outputs/site/`, etc.
+
+Vault structure (same in both modes):
+- `Memory/` — curated, canonical, durable knowledge (MEMORY.md + branch files)
+- `Evidence/` — non-canonical: raw imports, captures, backfills
+- `Outputs/` — generated helper artifacts (site, index, canvas) — never canonical
+- `Sessions/` — temporary working state, rolled up by sync
+- `History/` — lightweight diary: events.ndjson, history.md, timeline/
 
 ## Path Resolution
 
@@ -78,6 +86,7 @@ Site views: Overview, Tree/Ontology, Note/Detail, Evidence, Graph (force-directe
 ## Project Config (`.agent-project.yaml`)
 
 - Version 4, `ontology_model: 2`, `framework_version` field
+- `knowledge.vault_mode: local|external` — set by `init --local` or `migrate-to-local`
 - `onboarding: status: pending|complete` in STATUS.md
 - No `root_index` — entry points are STATUS.md + Memory/MEMORY.md
 - Hooks reference `agent-knowledge update --project .`
@@ -85,18 +94,9 @@ Site views: Overview, Tree/Ontology, Note/Detail, Evidence, Graph (force-directe
 ## System Refresh (`runtime/refresh.py`)
 
 - Compares `framework_version` in STATUS.md to `__version__`
-- Refreshes: `AGENTS.md`, `.cursor/hooks.json`, `.cursor/rules/agent-knowledge.mdc`, `.cursor/commands/`, `CLAUDE.md`, `.codex/AGENTS.md`, `STATUS.md`, `.agent-project.yaml`
-- `_refresh_cursor_commands()`: creates or updates command files (memory-update.md, system-update.md)
-- `check_cursor_integration()`: validates rule/hooks/commands health — called by `doctor`
-- `is_stale()` used by `doctor` command for version staleness warning
+- Refreshes: `AGENTS.md`, `.cursor/hooks.json`, `.cursor/rules/agent-knowledge.mdc`, `CLAUDE.md`, `.codex/AGENTS.md`, `STATUS.md`, `.agent-project.yaml`
 - Idempotent: skips files already at current version
-
-## Periodic Update Mechanics (added 2026-04-13)
-
-- `session-start` hook runs `sync && refresh-system` — integration files self-heal on every session open
-- `_CURSOR_RULE` and `CLAUDE.md` template include explicit "Periodic (every few sessions): run /system-update" instruction
-- Rule also says "After meaningful work: run /memory-update" as a session-end habit
-- Gotcha: `_refresh_cursor_rule` compares installed rule against `_CURSOR_RULE` constant — if `.pyc` is stale (system Python shadowing venv), comparison may report false "up-to-date"; fix by forcing reinstall or writing rule directly
+- `is_stale()` used by `doctor` command for staleness warning
 
 ## Capture Layer
 
@@ -117,4 +117,3 @@ Site views: Overview, Tree/Ontology, Note/Detail, Evidence, Graph (force-directe
 - `ship.sh` must use `python -m pytest -q` not bare `pytest`
 - Canvas 2D rendering: reading `clientWidth`/`clientHeight` after `display:none→block` must be deferred with `requestAnimationFrame` (graph fix, 2026-04-11)
 - Evidence/Outputs are non-canonical and must not be auto-promoted to Memory/
-- Editable installs (`pip install -e .`) copy assets into `.venv/site-packages/` at install time — script edits under `assets/scripts/` require re-running `pip install -e .` to propagate

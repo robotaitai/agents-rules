@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: architecture
-updated: 2026-04-11
+updated: 2026-04-23
 tags:
   - agent-knowledge
   - memory
@@ -28,14 +28,22 @@ Core design: path resolution, runtime modules, project config, integrations, kno
 
 ## Knowledge Vault Model
 
-- External vault at `~/agent-os/projects/<slug>/` — source of truth
-- Inside each repo: `./agent-knowledge` is a symlink/pointer to the external vault
-- Vault structure:
-  - `Memory/` — curated, canonical, durable knowledge (MEMORY.md + branch files)
-  - `Evidence/` — non-canonical: raw imports, captures, backfills
-  - `Outputs/` — generated helper artifacts (site, index, canvas) — never canonical
-  - `Sessions/` — temporary working state, rolled up by sync
-  - `History/` — lightweight diary: events.ndjson, history.md, timeline/
+Two storage modes controlled by `vault_mode` in `.agent-project.yaml`:
+
+| Mode | `./agent-knowledge` | `~/agent-os/projects/<slug>/` |
+|------|--------------------|-----------------------------|
+| `external` (default) | symlink → external vault | real directory (source of truth) |
+| `local` | real directory in repo (git-tracked) | symlink → `./agent-knowledge` |
+
+Use `agent-knowledge init --local` for local mode, or `agent-knowledge migrate-to-local` to convert.
+In local mode, `.gitignore` auto-patched to exclude `Evidence/raw/`, `Sessions/`, `Outputs/site/`, etc.
+
+Vault structure (same in both modes):
+- `Memory/` — curated, canonical, durable knowledge (MEMORY.md + branch files)
+- `Evidence/` — non-canonical: raw imports, captures, backfills
+- `Outputs/` — generated helper artifacts (site, index, canvas) — never canonical
+- `Sessions/` — temporary working state, rolled up by sync
+- `History/` — lightweight diary: events.ndjson, history.md, timeline/
 
 ## Path Resolution
 
@@ -78,6 +86,7 @@ Site views: Overview, Tree/Ontology, Note/Detail, Evidence, Graph (force-directe
 ## Project Config (`.agent-project.yaml`)
 
 - Version 4, `ontology_model: 2`, `framework_version` field
+- `knowledge.vault_mode: local|external` — set by `init --local` or `migrate-to-local`
 - `onboarding: status: pending|complete` in STATUS.md
 - No `root_index` — entry points are STATUS.md + Memory/MEMORY.md
 - Hooks reference `agent-knowledge update --project .`
